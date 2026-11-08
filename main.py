@@ -234,7 +234,13 @@ def _match_details(match_record: models.Match) -> dict:
         "goal_scorers_available": any(
             player.goals is not None for _team_name, player in players
         ),
+        "goal_scorers_complete": bool(players) and all(
+            player.goals is not None for _team_name, player in players
+        ),
         "goal_assists_available": any(
+            player.assists is not None for _team_name, player in players
+        ),
+        "goal_assists_complete": bool(players) and all(
             player.assists is not None for _team_name, player in players
         ),
         "contributions_source": "strikerapi_lineups" if players else None,
@@ -259,7 +265,10 @@ def _statistics_api_http_error(error: StatisticsAPIError) -> None:
             detail="BigBallsData rate limit reached. No retry was attempted.",
         ) from error
     if isinstance(error, StatisticsAPITimeoutError):
-        raise HTTPException(status_code=504, detail=str(error)) from error
+        raise HTTPException(
+            status_code=504,
+            detail="BigBallsData request timed out. No retry was attempted.",
+        ) from error
     if isinstance(error, MalformedStatisticsAPIResponseError):
         raise HTTPException(status_code=502, detail=str(error)) from error
     if isinstance(error, StatisticsAPINetworkError):

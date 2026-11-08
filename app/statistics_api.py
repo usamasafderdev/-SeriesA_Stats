@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import httpx
 from dotenv import load_dotenv
@@ -145,7 +146,12 @@ class StatisticsAPI:
         """Read the stored-only statistics for a BigBallsData match ID."""
         if not isinstance(provider_match_id, str) or not provider_match_id.strip():
             raise ValueError("provider_match_id must be non-empty text.")
+        provider_match_id = provider_match_id.strip()
+        try:
+            UUID(provider_match_id)
+        except ValueError:
+            raise ValueError("provider_match_id must be a canonical UUID.") from None
         return self._get(
-            f"/v1/matches/{provider_match_id.strip()}/statistics",
+            f"/v1/matches/{provider_match_id}/statistics",
             {},
         )

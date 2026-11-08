@@ -239,25 +239,28 @@
     const home = item.home_team.name;
     const away = item.away_team.name;
     const stats = item.statistics || {};
-    function contributionPanel(title, entries, available, fieldName) {
+    function contributionPanel(title, entries, available, complete, fieldName) {
       const rows = entries.map(function (entry) {
         return '<li><b>' + escapeHtml(entry.player_name) + '</b><span>' +
           escapeHtml(entry.team_name) + ' · ' + entry[fieldName] + '</span></li>';
       }).join("");
+      const coverageNote = available && !complete
+        ? '<small class="metric-unavailable">Some player contribution values were not supplied.</small>'
+        : "";
       const content = rows
-        ? '<ul class="lineup-list">' + rows + '</ul>'
-        : '<p class="muted">' + (available ? "No recorded " + title.toLowerCase() + "." : "Not available. Saved lineup data may not include player contributions.") + '</p>';
+        ? '<ul class="lineup-list">' + rows + '</ul>' + coverageNote
+        : '<p class="muted">' + (complete ? "No recorded " + title.toLowerCase() + "." : "Not available. Saved lineup data may not include all player contributions.") + '</p>';
       return '<section class="panel detail-panel"><div class="panel-heading"><div><h2>' + title + '</h2><p>' + (item.contributions_source ? "Saved player data" : "No player contribution data is stored") + '</p></div>' + icon("goal", 17) + '</div>' + content + '</section>';
     }
     const contributionStats = '<div class="detail-grid">' +
-      contributionPanel("Goal scorers", item.goal_scorers || [], item.goal_scorers_available, "goals") +
-      contributionPanel("Assists", item.goal_assists || [], item.goal_assists_available, "assists") +
+      contributionPanel("Goal scorers", item.goal_scorers || [], item.goal_scorers_available, item.goal_scorers_complete, "goals") +
+      contributionPanel("Assists", item.goal_assists || [], item.goal_assists_available, item.goal_assists_complete, "assists") +
       '</div>';
     let activeContent;
     if (state.detailTab === "events") {
       activeContent = '<section class="panel detail-panel"><div class="panel-heading"><div><h2>Player Contributions</h2><p>Recorded from saved StrikerAPI lineup records; not a minute-by-minute event feed.</p></div></div><div class="detail-grid">' +
-        contributionPanel("Goal scorers", item.goal_scorers || [], item.goal_scorers_available, "goals") +
-        contributionPanel("Assists", item.goal_assists || [], item.goal_assists_available, "assists") +
+        contributionPanel("Goal scorers", item.goal_scorers || [], item.goal_scorers_available, item.goal_scorers_complete, "goals") +
+        contributionPanel("Assists", item.goal_assists || [], item.goal_assists_available, item.goal_assists_complete, "assists") +
         '</div></section>';
     } else if (state.detailTab === "lineups") {
       const savedLineups = state.liveLineups && state.liveLineups.match_id === item.id ? state.liveLineups.lineups : [];

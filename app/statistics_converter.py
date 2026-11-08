@@ -4,6 +4,7 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 
 def _required_text(value: Any, field_name: str) -> str:
@@ -46,6 +47,10 @@ def convert_provider_match(match: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Each provider match must be an object.")
 
     match_id = _required_text(match.get("id"), "provider match ID")
+    try:
+        UUID(match_id)
+    except ValueError:
+        raise ValueError("Provider match ID must be a canonical UUID.") from None
     sport = _required_text(match.get("sport"), "provider sport")
     league = _required_text(match.get("league"), "provider league")
     home = match.get("home")
@@ -216,6 +221,16 @@ def convert_match_statistics(
     data = response.get("data")
     if not isinstance(data, dict):
         raise ValueError("Provider statistics response must include a data object.")
+    if "home" not in data or "away" not in data:
+        raise ValueError(
+            "Provider statistics data must include both home and away fields."
+        )
+    metadata = response.get("meta")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("Provider statistics metadata must be an object.")
+    available_flag = metadata.get("available") if metadata else None
+    if available_flag is not None and not isinstance(available_flag, bool):
+        raise ValueError("Provider statistics availability must be true or false.")
 
     home = _team_statistics(
         data.get("home"),
@@ -240,16 +255,16 @@ def convert_match_statistics(
             "away_shots": None,
             "away_shots_on_target": None,
         }),
-        "available": (
-            response.get("meta", {}).get("available") is not False
-            and any(value is not None for key, value in {
-                **(home or {}),
-                **(away or {}),
-            }.items() if key != "available")
-        )
-        if isinstance(response.get("meta"), dict)
-        else any(
+        "available": available_flag is not False
+        and any(
             value is not None
-            for value in (home or {}).values()
-        ) or any(value is not None for value in (away or {}).values()),
+            for value in (
+                (home or {}).get("home_possession"),
+                (home or {}).get("home_shots"),
+                (home or {}).get("home_shots_on_target"),
+                (away or {}).get("away_possession"),
+                (away or {}).get("away_shots"),
+                (away or {}).get("away_shots_on_target"),
+            )
+        ),
     }

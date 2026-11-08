@@ -1,4 +1,5 @@
 from datetime import datetime
+import sqlite3
 
 import pytest
 from sqlalchemy import inspect
@@ -160,6 +161,51 @@ def test_missing_match_statistics_are_allowed(database_session):
     assert statistics.away_shots is None
     assert statistics.home_shots_on_target is None
     assert statistics.away_shots_on_target is None
+    assert statistics.source == "unknown"
+
+
+def test_initializing_old_statistics_table_adds_columns_and_preserves_rows(
+    tmp_path,
+):
+    database_path = tmp_path / "old_serie_a.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE match_statistics (
+            id INTEGER PRIMARY KEY,
+            match_id INTEGER NOT NULL UNIQUE,
+            home_possession FLOAT,
+            away_possession FLOAT,
+            home_shots INTEGER,
+            away_shots INTEGER,
+            home_shots_on_target INTEGER,
+            away_shots_on_target INTEGER
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO match_statistics (
+            id, match_id, home_possession, away_possession,
+            home_shots, away_shots, home_shots_on_target, away_shots_on_target
+        ) VALUES (1, 23, 55.5, 44.5, 12, 8, 5, 3)
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database_engine = create_database_engine(database_path)
+    initialize_database(database_engine)
+    with create_database_session(database_engine) as session:
+        saved = session.get(MatchStatistics, 1)
+
+        assert saved is not None
+        assert saved.match_id == 23
+        assert saved.home_possession == 55.5
+        assert saved.home_shots == 12
+        assert saved.source == "unknown"
+        assert saved.provider_match_id is None
+    database_engine.dispose()
 
 
 def test_duplicate_external_match_id_is_rejected(database_session):

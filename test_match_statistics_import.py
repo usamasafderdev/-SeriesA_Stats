@@ -19,9 +19,13 @@ PROVIDER_MATCH_ID = "bbe0db21-9e62-4cb0-a65c-b1dc7781aa66"
 
 
 @pytest.fixture
-def api_client(tmp_path):
+def api_client(tmp_path, monkeypatch):
     database_engine = create_database_engine(tmp_path / "statistics_api.db")
     initialize_database(database_engine)
+    monkeypatch.setattr(
+        "main.initialize_database",
+        lambda: initialize_database(database_engine),
+    )
 
     def use_test_database():
         session = create_database_session(database_engine)
@@ -39,10 +43,21 @@ def api_client(tmp_path):
         database_engine.dispose()
 
 
-def create_live_match(database_engine, status="final"):
+def create_live_match(database_engine, status="final", data_source="live"):
     with create_database_session(database_engine) as session:
-        home = add_team(session, "Inter", api_team_id=239, data_source="live")
-        away = add_team(session, "Juventus", api_team_id=268, data_source="live")
+        live = data_source == "live"
+        home = add_team(
+            session,
+            "Inter",
+            api_team_id=239 if live else None,
+            data_source=data_source,
+        )
+        away = add_team(
+            session,
+            "Juventus",
+            api_team_id=268 if live else None,
+            data_source=data_source,
+        )
         match = add_match(
             session,
             season="2026/2027",
@@ -52,8 +67,8 @@ def create_live_match(database_engine, status="final"):
             home_score=0,
             away_score=0,
             status=status,
-            api_match_id=737158,
-            data_source="live",
+            api_match_id=737158 if live else None,
+            data_source=data_source,
         )
         return match.id
 
@@ -125,11 +140,7 @@ def test_import_requires_confirmation_and_stored_live_match(api_client, monkeypa
     assert "two" in response.json()["detail"]
     assert api.calls == []
 
-    demo_match_id = create_live_match(database_engine)
-    with create_database_session(database_engine) as session:
-        live_match = session.get(Match, demo_match_id)
-        live_match.data_source = "demo"
-        session.commit()
+    demo_match_id = create_live_match(database_engine, data_source="demo")
 
     response = client.post(
         f"/api/matches/{demo_match_id}/statistics/import",
@@ -319,7 +330,9 @@ def test_match_details_include_saved_goal_scorers_and_assists(api_client):
     with create_database_session(database_engine) as session:
         match = session.get(Match, match_id)
         home_lineup = MatchLineup(match=match, team=match.home_team)
+        session.add(home_lineup)
         away_lineup = MatchLineup(match=match, team=match.away_team)
+        session.add(away_lineup)
         home_lineup.players.append(
             LineupPlayer(
                 player_name="Home scorer",
@@ -336,7 +349,6 @@ def test_match_details_include_saved_goal_scorers_and_assists(api_client):
                 assists=1,
             )
         )
-        session.add_all([home_lineup, away_lineup])
         session.commit()
 
     response = client.get(f"/api/matches/{match_id}")

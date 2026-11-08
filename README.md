@@ -154,6 +154,20 @@ To run the client tests without internet access or API credits:
 python -m pytest -v
 ```
 
+## Match statistics provider
+
+The `get_game` StrikerAPI request has timed out repeatedly, so the app does not keep retrying it. BigBallsData is the documented fallback for match-level possession and shot counts. Its official soccer page lists Serie A and says the free plan covers the current season; it advertises 1,000 requests per day and 100 per minute. Older seasons may require a paid plan. Check its current [pricing](https://bigballsdata.com/pricing), [Serie A coverage](https://bigballsdata.com/serie-a-api), and [rate limits](https://bigballsdata.com/docs/rate-limits) before use.
+
+The implementation follows the provider's [OpenAPI contract](https://bigballsdata.com/openapi.json): it looks up the fixture with `GET /v1/matches?sport=football&league=seriea&date=...&season=...`, then reads stored team stats from `GET /v1/matches/{id}/statistics`. This statistics route is described as free and stored-only. Its response places home and away records in `data.home` and `data.away`; possession is `ball_possession`, total attempts are `total_shots`, and shots on target are `shots_on_target`. The values may be null or unavailable. The provider's canonical match ID comes from its own fixture list; a StrikerAPI ID is never sent as a BigBallsData ID.
+
+To configure the new provider, copy `.env.example` to `.env` and set `BIGBALLSDATA_API_KEY` from the BigBallsData dashboard. Keep that key in the ignored `.env` file only. Do not put it in JavaScript, share it, or commit it. The API key is used only by the Python backend.
+
+On a saved live match's Overview tab, **Import match statistics** asks for confirmation before making up to two BigBallsData requests. The first request matches the season, UTC date, and exact home/away team names; the second uses the canonical provider match ID returned by that lookup. A mismatch or ambiguous fixture is rejected. Successful results are saved in the existing `MatchStatistics` row with their provider name and canonical provider ID. Reopening the match reads SQLite; **Refresh statistics** is a separate, confirmed request. No automatic requests or retries are made. A timeout, plan restriction, or provider response with missing statistics is shown honestly.
+
+The displayed final score remains the saved match-list score. Goal scorers and assists are shown only when they were included in the already-saved StrikerAPI player lineups; the BigBallsData team-stat response does not itself identify those players. If lineup contributions are unavailable, the page says so rather than deriving scorers from the score.
+
+Automated tests use mocked responses and temporary SQLite databases. No provider request is made during tests. A real authenticated response has not yet been verified; it still requires explicit approval and a locally configured key.
+
 ## Preview screenshots
 
 - [Landing page](./screenshots/01-landing.png)
