@@ -41,6 +41,15 @@ build/Release
 # Dependency directories
 node_modules/
 jspm_packages/
+.venv/
+
+# Python cache and test files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local SQLite database
+serie_a.db
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
