@@ -1,0 +1,45 @@
+{
+  "provider": "APIDojo SofaScore via RapidAPI",
+  "search_endpoint": {
+    "method": "GET",
+    "path": "/search",
+    "query": {
+      "q": "Serie A",
+      "type": "unique-tournaments",
+      "page": 0
+    },
+    "host": "sofascore.p.rapidapi.com"
+  },
+  "search_http_status": 200,
+  "fixture_endpoint_documented": {
+    "method": "GET",
+    "path": "/tournaments/get-scheduled-events",
+    "required_query": [
+      "categoryId"
+    ],
+    "optional_query": [
+      "date"
+    ],
+    "host": "sofascore.p.rapidapi.com"
+  },
+  "serie_a_candidates": [
+    {
+      "entity_id": 23,
+      "entity_type": "uniquetournament",
+      "name": "Serie A",
+      "category_id": 31,
+      "category_name": "Italy",
+      "season_id": null,
+      "season_name": null
+    },
+    {
+      "entity_id": 595,
+      "entity_type": "uniquetournament",
+      "name": "Serie A",
+      "category_id": 185,
+      "category_name": "Italy",
+      "season_id": null,
+      "season_name": null
+    }
+  ]
+}

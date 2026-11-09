@@ -1,0 +1,36 @@
+{
+  "provider": "bigballsdata",
+  "season": 2026,
+  "fixture_pages": 2,
+  "fixture_count": 275,
+  "fixture_fields": [
+    "attendance",
+    "away",
+    "broadcast",
+    "has_odds",
+    "home",
+    "id",
+    "kickoff_utc",
+    "league",
+    "linescore",
+    "round",
+    "score",
+    "sport",
+    "status"
+  ],
+  "standings_fields": [
+    "data",
+    "error",
+    "meta"
+  ],
+  "standings_sample_keys": [],
+  "statistics_fields": [
+    "data",
+    "meta"
+  ],
+  "import_summary": {
+    "created": 274,
+    "updated": 1,
+    "skipped": 0
+  }
+}

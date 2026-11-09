@@ -37,6 +37,32 @@ def test_provider_match_conversion_keeps_canonical_id_and_zero_score():
     assert converted["match_date"] == datetime(
         2026, 10, 25, 18, 45, tzinfo=timezone.utc
     )
+    assert converted["round_name"] is None
+
+
+def test_provider_round_is_saved_as_display_text():
+    assert convert_provider_match(matching_fixture(round=12))["round_name"] == "12"
+    assert (
+        convert_provider_match(matching_fixture(round="Round 12"))["round_name"]
+        == "Round 12"
+    )
+
+
+@pytest.mark.parametrize("round_value", [True, [], "x" * 81])
+def test_provider_round_rejects_invalid_values(round_value):
+    with pytest.raises(ValueError, match="round"):
+        convert_provider_match(matching_fixture(round=round_value))
+
+
+def test_date_only_provider_fixture_does_not_claim_a_kickoff_time():
+    converted = convert_provider_match(
+        matching_fixture(kickoff_utc="2026-11-08")
+    )
+
+    assert converted["match_date"] == datetime(
+        2026, 11, 8, tzinfo=timezone.utc
+    )
+    assert converted["kickoff_time_available"] is False
 
 
 def test_match_lookup_requires_exact_date_and_oriented_team_names():
@@ -187,6 +213,32 @@ def test_statistics_conversion_preserves_missing_fields_as_null():
     assert converted["home_shots"] is None
     assert converted["away_possession"] is None
     assert converted["away_shots"] is None
+    assert converted["available"] is False
+
+
+def test_statistics_metadata_can_mark_present_fields_unavailable():
+    response = {
+        "data": {
+            "home": {
+                "team_id": "provider-home",
+                "team_name": "Inter",
+                "ball_possession": 55,
+                "total_shots": 10,
+                "shots_on_target": 4,
+            },
+            "away": None,
+        },
+        "meta": {"available": False},
+    }
+
+    converted = convert_match_statistics(
+        response,
+        convert_provider_match(PROVIDER_FIXTURE),
+    )
+
+    assert converted["home_possession"] is None
+    assert converted["home_shots"] is None
+    assert converted["home_shots_on_target"] is None
     assert converted["available"] is False
 
 

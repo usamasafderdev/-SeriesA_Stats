@@ -250,6 +250,7 @@ td:last-child { border-right: 1px solid rgba(157,181,218,.08); border-radius: 0 
 .number-grid div { display: flex; flex-direction: column; gap: 2px; padding: 11px; border: 1px solid rgba(151,177,218,.1); border-radius: 8px; background: rgba(25,42,68,.65); }
 .number-grid span { color: #95a7c0; font-size: 9px; }
 .number-grid b { font: 800 19px Manrope, var(--font); }
+.number-grid small { color: #8193ad; font-size: 8px; line-height: 1.4; }
 .chart-panel { min-width: 0; padding: 13px 15px 8px; }
 .chart-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .chart-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }

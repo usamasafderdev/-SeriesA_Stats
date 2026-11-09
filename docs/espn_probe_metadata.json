@@ -1,0 +1,35 @@
+{
+  "provider": "ESPN public soccer JSON",
+  "league_slug": "ita.1",
+  "scoreboard_request": {
+    "method": "GET",
+    "path": "/scoreboard",
+    "query": {
+      "dates": "20261108"
+    },
+    "status": 200
+  },
+  "summary_request": {
+    "method": "GET",
+    "path": "/summary",
+    "query": {
+      "event": "401874810"
+    },
+    "status": 200
+  },
+  "event_name": "Lazio at Napoli",
+  "event_id": "401874810",
+  "summary_field_keys": [
+    "athlete",
+    "competitors",
+    "formation",
+    "position",
+    "possession",
+    "redCard",
+    "roster",
+    "starter",
+    "statistics",
+    "substitution",
+    "yellowCard"
+  ]
+}

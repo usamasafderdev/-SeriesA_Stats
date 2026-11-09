@@ -1,0 +1,103 @@
+{
+  "provider": "bigballsdata",
+  "endpoint": "/v1/matches",
+  "request": {
+    "sport": "football",
+    "league": "serie_a",
+    "season": 2026,
+    "status": "finished",
+    "limit": 5
+  },
+  "fixture_count": 5,
+  "fields": [
+    "attendance",
+    "away",
+    "broadcast",
+    "has_odds",
+    "home",
+    "id",
+    "kickoff_utc",
+    "league",
+    "linescore",
+    "round",
+    "score",
+    "sport",
+    "status"
+  ],
+  "sample": [
+    {
+      "id": "5a5e7d30-3b82-4965-bede-8cead82536e6",
+      "sport": "football",
+      "league": "Serie A",
+      "home": {
+        "id": "70226120-96e4-4516-b8a2-20a58f49bf12",
+        "name": "Fiorentina",
+        "short_name": "FIO",
+        "logo_url": "https://api.bigballsdata.com/v1/assets/bVc8VgjhlXfIyzJWh1v4Zjw9tATAnmcRGft9ql9evdlFbaA9zYd0nuzToBBVqQlRa64rAiMAbRLGE2ZTBt_G9TyjKA"
+      },
+      "away": {
+        "id": "1afc40a5-a6a6-41fc-85ff-95ac9c140733",
+        "name": "Juventus",
+        "short_name": "JUV",
+        "logo_url": "https://api.bigballsdata.com/v1/assets/FK9kh3dEOW7TCOJCRDN3mHIZm615N_eef1c0m4K7nVUb1FYKCclDKgyMridEbaWdipZqAt0uR4mzJR9QWmMW6VgHUB71FX8EY7GTJtZdIRNzsSPA4AKw0ARdrNLPngC_B4cn"
+      },
+      "kickoff_utc": "2026-11-08T19:45:00.000Z",
+      "status": "finished",
+      "score": {
+        "home": 2,
+        "away": 2
+      },
+      "linescore": {
+        "away": [
+          1,
+          1
+        ],
+        "home": [
+          1,
+          1
+        ]
+      },
+      "attendance": null,
+      "broadcast": "Paramount+",
+      "round": null,
+      "has_odds": true
+    },
+    {
+      "id": "15ceb2c8-014a-495b-81ca-19660a13a636",
+      "sport": "football",
+      "league": "Serie A",
+      "home": {
+        "id": "325dc8ae-18ee-437a-868e-a106b44d5383",
+        "name": "Inter Milan",
+        "short_name": "INT",
+        "logo_url": "https://api.bigballsdata.com/v1/assets/-JFaJDZZ3XZwIGPdMUV_Ni_r-IsDcowr4KrQIIGrx07GViSmwIhW-FlOyKzvWHxTcJMmUlWzPs0fX-mHybiI4fgylLIxu4KYoFI0UW_DyI0"
+      },
+      "away": {
+        "id": "40463b4d-7cb3-4ce4-a4ca-d2e4a71e0abf",
+        "name": "Como 1907",
+        "short_name": "COM",
+        "logo_url": "https://api.bigballsdata.com/v1/assets/aZuimKi2USTijSsrWDN-KGcuNXi21qy5VgiJk9qlCo6zyjRmejFFBWNutXoxo7kmXyDP0qA0p6lgQdLn8_Gp80IA61cs"
+      },
+      "kickoff_utc": "2026-11-08T17:00:00.000Z",
+      "status": "finished",
+      "score": {
+        "home": 2,
+        "away": 0
+      },
+      "linescore": {
+        "away": [
+          0,
+          0
+        ],
+        "home": [
+          2,
+          0
+        ]
+      },
+      "attendance": null,
+      "broadcast": "Paramount+",
+      "round": null,
+      "has_odds": true
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "RapidAPI Hub - Football Highlights API": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.rapidapi.com",
+        "--header",
+        "x-api-host: football-highlights-api.p.rapidapi.com",
+        "--header",
+        "x-api-key: d05de9625amsh5dee644691cceccp124b78jsnc9f5f3584e26"
+      ]
+    }
+  }
+}

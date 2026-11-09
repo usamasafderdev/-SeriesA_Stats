@@ -78,6 +78,16 @@ def _player_record(
             player_data.get("minute_off"),
             "minute_off",
         ),
+        "rating": player_data.get("rating"),
+        "minutes_played": _integer_or_none(
+            player_data.get("minutes_played"), "minutes_played"
+        ),
+        "shots_total": _integer_or_none(
+            player_data.get("shots_total"), "shots_total"
+        ),
+        "shots_on_target": _integer_or_none(
+            player_data.get("shots_on_target"), "shots_on_target"
+        ),
     }
     player_fields.update(
         {

@@ -19,7 +19,7 @@ from app.match_service import (
     list_matches,
     save_or_update_match_statistics,
 )
-from app.models import MatchStatistics
+from app.models import Match, MatchStatistics
 
 
 @pytest.fixture
@@ -62,6 +62,7 @@ def test_database_tables_are_created(database_session):
         "match_statistics",
         "match_lineups",
         "lineup_players",
+        "saved_matches",
     }
 
 
@@ -205,6 +206,36 @@ def test_initializing_old_statistics_table_adds_columns_and_preserves_rows(
         assert saved.home_shots == 12
         assert saved.source == "unknown"
         assert saved.provider_match_id is None
+    database_engine.dispose()
+
+
+def test_provider_identity_migration_adds_columns_and_saved_table_without_data_loss(
+    tmp_path,
+):
+    database_path = tmp_path / "previous_schema.db"
+    database_engine = create_database_engine(database_path)
+    initialize_database(database_engine)
+    with create_database_session(database_engine) as session:
+        home, away = add_test_teams(session, data_source="live")
+        match = add_test_match(session, home, away, data_source="live")
+        saved_match_id = match.id
+    initialize_database(database_engine)
+
+    inspector = inspect(database_engine)
+    assert "bbs_team_id" in {
+        column["name"] for column in inspector.get_columns("teams")
+    }
+    assert {
+        "bbs_match_id",
+        "fetched_at",
+        "kickoff_time_available",
+        "round_name",
+    } <= {
+        column["name"] for column in inspector.get_columns("matches")
+    }
+    assert "saved_matches" in inspector.get_table_names()
+    with create_database_session(database_engine) as session:
+        assert session.get(Match, saved_match_id) is not None
     database_engine.dispose()
 
 

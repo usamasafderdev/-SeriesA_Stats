@@ -47,9 +47,11 @@ class StatisticsAPI:
     """Read Serie A fixtures and stored match statistics."""
 
     def __init__(self, api_key: str | None = None):
-        configured_key = api_key if api_key is not None else os.getenv(
-            "BIGBALLSDATA_API_KEY"
-        )
+        configured_key = api_key
+        if configured_key is None:
+            configured_key = os.getenv("BBS_API_KEY")
+        if configured_key is None:
+            configured_key = os.getenv("BIGBALLSDATA_API_KEY")
         self._api_key = configured_key.strip() if configured_key else ""
 
     def _get(
@@ -60,15 +62,21 @@ class StatisticsAPI:
         """Send one authenticated GET request without retrying."""
         if not self._api_key:
             raise MissingStatisticsAPIKeyError(
-                "Set BIGBALLSDATA_API_KEY in the local .env file."
+                "Set BBS_API_KEY in the local .env file."
             )
 
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            with httpx.Client(
+                timeout=REQUEST_TIMEOUT,
+                verify=True,
+                trust_env=True,
+                http1=True,
+                http2=False,
+            ) as client:
                 response = client.get(
                     f"{BASE_URL}{path}",
                     params=params,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    headers={"x-api-key": self._api_key},
                 )
         except httpx.TimeoutException as error:
             raise StatisticsAPITimeoutError(
@@ -127,7 +135,7 @@ class StatisticsAPI:
             "/v1/matches",
             {
                 "sport": "football",
-                "league": "seriea",
+                "league": "serie_a",
                 "date": match_date,
                 "season": season,
                 "limit": 200,
@@ -139,6 +147,71 @@ class StatisticsAPI:
         ):
             raise MalformedStatisticsAPIResponseError(
                 "BigBallsData match data must be a list of match objects."
+            )
+        return matches
+
+    def list_season_matches(
+        self,
+        season: int,
+        page: int = 1,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """List one documented page of Serie A fixtures for one season."""
+        if isinstance(season, bool) or not isinstance(season, int) or season < 2000:
+            raise ValueError("season must be a four-digit starting year.")
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise ValueError("page must be a positive whole number.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200.")
+        body = self._get(
+            "/v1/matches",
+            {
+                "sport": "football",
+                "league": "serie_a",
+                "season": season,
+                "page": page,
+                "limit": limit,
+            },
+        )
+        matches = body.get("data")
+        if not isinstance(matches, list) or any(
+            not isinstance(match, dict) for match in matches
+        ):
+            raise MalformedStatisticsAPIResponseError(
+                "BigBallsData match data must be a list of match objects."
+            )
+        if len(matches) > limit:
+            raise MalformedStatisticsAPIResponseError(
+                "BigBallsData returned more matches than the requested limit."
+            )
+        return matches
+
+    def list_finished_matches(self, season: int, limit: int) -> list[dict[str, Any]]:
+        """Compatibility wrapper for the earlier bounded finished-match call."""
+        if isinstance(season, bool) or not isinstance(season, int) or season < 2000:
+            raise ValueError("season must be a four-digit starting year.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5:
+            raise ValueError("limit must be between 1 and 5.")
+        body = self._get(
+            "/v1/matches",
+            {
+                "sport": "football",
+                "league": "serie_a",
+                "season": season,
+                "status": "finished",
+                "limit": limit,
+            },
+        )
+        matches = body.get("data")
+        if not isinstance(matches, list) or any(
+            not isinstance(match, dict) for match in matches
+        ):
+            raise MalformedStatisticsAPIResponseError(
+                "BigBallsData match data must be a list of match objects."
+            )
+        if len(matches) > limit:
+            raise MalformedStatisticsAPIResponseError(
+                "BigBallsData returned more matches than the requested limit."
             )
         return matches
 
@@ -154,4 +227,17 @@ class StatisticsAPI:
         return self._get(
             f"/v1/matches/{provider_match_id}/statistics",
             {},
+        )
+
+    def get_standings(self, season: int) -> dict[str, Any]:
+        """Read the provider's official Serie A standings for one season."""
+        if isinstance(season, bool) or not isinstance(season, int) or season < 2000:
+            raise ValueError("season must be a four-digit starting year.")
+        return self._get(
+            "/v1/standings",
+            {
+                "sport": "football",
+                "league": "serie_a",
+                "season": season,
+            },
         )

@@ -53,6 +53,7 @@ def initialize_database(database_engine: Engine = engine) -> None:
     """Create any database tables that do not exist yet."""
     Base.metadata.create_all(bind=database_engine)
     _add_match_statistics_source_columns(database_engine)
+    _add_provider_identity_columns(database_engine)
 
 
 def _add_match_statistics_source_columns(database_engine: Engine) -> None:
@@ -76,3 +77,111 @@ def _add_match_statistics_source_columns(database_engine: Engine) -> None:
                     "ADD COLUMN provider_match_id VARCHAR(100)"
                 )
             )
+
+
+def _add_provider_identity_columns(database_engine: Engine) -> None:
+    """Add BBS identities and refresh timestamps without replacing saved rows."""
+    table_columns = {
+        table_name: {
+            column["name"]
+            for column in inspect(database_engine).get_columns(table_name)
+        }
+        for table_name in ("teams", "matches", "match_statistics")
+    }
+    additions = {
+        "teams": {"bbs_team_id": "VARCHAR(100)"},
+        "matches": {
+            "bbs_match_id": "VARCHAR(100)",
+            "fetched_at": "DATETIME",
+            "kickoff_time_available": "BOOLEAN NOT NULL DEFAULT 1",
+            "round_name": "VARCHAR(80)",
+        },
+        "match_statistics": {"fetched_at": "DATETIME"},
+    }
+    with database_engine.begin() as connection:
+        for table_name, columns in additions.items():
+            for column_name, column_type in columns.items():
+                if column_name not in table_columns[table_name]:
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table_name} "
+                            f"ADD COLUMN {column_name} {column_type}"
+                        )
+                    )
+        for table_name, column_name in (
+            ("teams", "football_data_team_id"),
+            ("matches", "football_data_match_id"),
+            ("matches", "highlightly_match_id"),
+        ):
+            columns = {
+                column["name"]
+                for column in inspect(database_engine).get_columns(table_name)
+            }
+            if column_name not in columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        f"ADD COLUMN {column_name} VARCHAR(100)"
+                    )
+                )
+        lineup_columns = {
+            column["name"]
+            for column in inspect(database_engine).get_columns("lineup_players")
+        }
+        for column_name, column_type in {
+            "rating": "FLOAT",
+            "minutes_played": "INTEGER",
+            "shots_total": "INTEGER",
+            "shots_on_target": "INTEGER",
+        }.items():
+            if column_name not in lineup_columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE lineup_players ADD COLUMN "
+                        f"{column_name} {column_type}"
+                    )
+                )
+        statistics_columns = {
+            column["name"]
+            for column in inspect(database_engine).get_columns("match_statistics")
+        }
+        if "highlightly_match_id" not in statistics_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE match_statistics "
+                    "ADD COLUMN highlightly_match_id VARCHAR(100)"
+                )
+            )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_teams_bbs_team_id "
+                "ON teams (bbs_team_id) WHERE bbs_team_id IS NOT NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_bbs_match_id "
+                "ON matches (bbs_match_id) WHERE bbs_match_id IS NOT NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_teams_football_data_id "
+                "ON teams (football_data_team_id) "
+                "WHERE football_data_team_id IS NOT NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_football_data_id "
+                "ON matches (football_data_match_id) "
+                "WHERE football_data_match_id IS NOT NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_highlightly_id "
+                "ON matches (highlightly_match_id) "
+                "WHERE highlightly_match_id IS NOT NULL"
+            )
+        )

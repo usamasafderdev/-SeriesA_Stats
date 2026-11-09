@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Match, MatchStatistics, Team
+from app.models import Match, MatchLineup, MatchStatistics, Team
 
 
 DATA_SOURCES = {"demo", "live"}
@@ -143,6 +143,7 @@ def find_match_by_id(
             joinedload(Match.home_team),
             joinedload(Match.away_team),
             joinedload(Match.statistics),
+            joinedload(Match.lineups).joinedload(MatchLineup.players),
         )
         .filter(Match.id == match_id)
     )
@@ -156,8 +157,10 @@ def list_matches(
     data_source: str | None = "demo",
     season: str | None = None,
     team: str | None = None,
+    round_name: str | None = None,
+    status: str | None = None,
 ) -> list[Match]:
-    """List matches with optional source, season, and team filters."""
+    """List matches with optional source, season, team, and round filters."""
     if data_source is not None:
         _check_data_source(data_source)
 
@@ -167,12 +170,17 @@ def list_matches(
             joinedload(Match.home_team),
             joinedload(Match.away_team),
             joinedload(Match.statistics),
+            joinedload(Match.lineups).joinedload(MatchLineup.players),
         )
     )
     if data_source is not None:
         query = query.filter(Match.data_source == data_source)
     if season is not None:
         query = query.filter(Match.season == season)
+    if round_name is not None:
+        query = query.filter(Match.round_name == round_name)
+    if status is not None:
+        query = query.filter(func.lower(Match.status) == status.casefold())
     if team is not None:
         team_name = team.strip().lower()
         query = query.filter(
@@ -229,6 +237,7 @@ def save_or_update_match_statistics(
     statistics.provider_match_id = (
         provider_match_id.strip() if provider_match_id is not None else None
     )
+    statistics.fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     try:
         session.commit()

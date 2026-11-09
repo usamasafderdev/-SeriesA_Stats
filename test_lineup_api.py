@@ -189,6 +189,32 @@ def test_get_lineups_returns_both_teams_and_player_statistics(api_client):
     assert body["lineups"][1]["starting_players"][0]["goals"] == 0
 
 
+def test_match_summary_calculates_assists_only_from_complete_lineups(api_client):
+    client, database_engine = api_client
+    match_id = create_live_match(database_engine)
+    with create_database_session(database_engine) as session:
+        match = session.get(Match, match_id)
+        for team in (match.home_team, match.away_team):
+            lineup = MatchLineup(match=match, team=team, formation="4-3-3")
+            session.add(lineup)
+            session.flush()
+            for index in range(11):
+                lineup.players.append(
+                    LineupPlayer(
+                        api_player_id=f"{team.id}-{index}",
+                        player_name=f"Player {team.id}-{index}",
+                        player_role="starter",
+                        assists=1 if team == match.home_team and index == 0 else 0,
+                    )
+                )
+        session.commit()
+
+    match_summary = client.get("/api/matches?source=live").json()[0]
+
+    assert match_summary["home_assists"] == 1
+    assert match_summary["away_assists"] == 0
+
+
 def test_get_lineups_identifies_a_missing_team_lineup(api_client):
     client, database_engine = api_client
     match_id = create_live_match(database_engine)

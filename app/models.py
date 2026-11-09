@@ -1,5 +1,6 @@
 from sqlalchemy import (
     CheckConstraint,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -32,6 +33,8 @@ class Team(Base):
 
     id = Column(Integer, primary_key=True)
     api_team_id = Column(Integer, nullable=True)
+    bbs_team_id = Column(String(100), nullable=True)
+    football_data_team_id = Column(String(100), nullable=True)
     name = Column(String(100), nullable=False)
     logo_url = Column(String(500), nullable=True)
     data_source = Column(String(20), nullable=False, default="demo")
@@ -65,14 +68,20 @@ class Match(Base):
 
     id = Column(Integer, primary_key=True)
     api_match_id = Column(Integer, nullable=True)
+    bbs_match_id = Column(String(100), nullable=True)
+    football_data_match_id = Column(String(100), nullable=True)
+    highlightly_match_id = Column(String(100), nullable=True)
     season = Column(String(20), nullable=False)
+    round_name = Column(String(80), nullable=True)
     match_date = Column(DateTime, nullable=False)
+    kickoff_time_available = Column(Boolean, nullable=False, default=True)
     home_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     away_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     home_score = Column(Integer, nullable=True)
     away_score = Column(Integer, nullable=True)
     status = Column(String(30), nullable=False, default="scheduled")
     data_source = Column(String(20), nullable=False, default="demo")
+    fetched_at = Column(DateTime, nullable=True)
 
     home_team = relationship(
         "Team",
@@ -95,6 +104,11 @@ class Match(Base):
         back_populates="match",
         cascade="all, delete-orphan",
     )
+    events = relationship(
+        "MatchEvent",
+        cascade="all, delete-orphan",
+        order_by="MatchEvent.id",
+    )
 
 
 class MatchStatistics(Base):
@@ -115,8 +129,55 @@ class MatchStatistics(Base):
     away_shots_on_target = Column(Integer, nullable=True)
     source = Column(String(40), nullable=False, default="unknown")
     provider_match_id = Column(String(100), nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+    highlightly_match_id = Column(String(100), nullable=True)
 
     match = relationship("Match", back_populates="statistics")
+
+
+class SavedMatch(Base):
+    __tablename__ = "saved_matches"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False, unique=True)
+    saved_at = Column(DateTime, nullable=False)
+
+    match = relationship("Match")
+
+
+class LeagueStanding(Base):
+    __tablename__ = "league_standings"
+    __table_args__ = (
+        UniqueConstraint("source", "season", "team_id", name="uq_standing_team"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    season = Column(String(20), nullable=False)
+    source = Column(String(40), nullable=False)
+    position = Column(Integer, nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    played = Column(Integer, nullable=False)
+    wins = Column(Integer, nullable=False)
+    draws = Column(Integer, nullable=False)
+    losses = Column(Integer, nullable=False)
+    goals_for = Column(Integer, nullable=False)
+    goals_against = Column(Integer, nullable=False)
+    goal_difference = Column(Integer, nullable=False)
+    points = Column(Integer, nullable=False)
+    team = relationship("Team")
+
+
+class MatchEvent(Base):
+    __tablename__ = "match_events"
+    id = Column(Integer, primary_key=True)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
+    provider_event_id = Column(String(100), nullable=True)
+    minute = Column(Integer, nullable=True)
+    event_type = Column(String(40), nullable=False)
+    team_name = Column(String(100), nullable=True)
+    player_name = Column(String(100), nullable=True)
+    assist_name = Column(String(100), nullable=True)
+    detail = Column(String(200), nullable=True)
 
 
 class MatchLineup(Base):
@@ -207,6 +268,10 @@ class LineupPlayer(Base):
     assists = Column(Integer, nullable=True)
     yellow_cards = Column(Integer, nullable=True)
     red_cards = Column(Integer, nullable=True)
+    rating = Column(Float, nullable=True)
+    minutes_played = Column(Integer, nullable=True)
+    shots_total = Column(Integer, nullable=True)
+    shots_on_target = Column(Integer, nullable=True)
 
     lineup = relationship("MatchLineup", back_populates="players")
 

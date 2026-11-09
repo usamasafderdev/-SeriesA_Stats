@@ -41,6 +41,19 @@ def _utc_datetime(value: Any, field_name: str) -> datetime:
     return result.astimezone(timezone.utc)
 
 
+def _optional_round(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("Provider round must be text, a whole number, or missing.")
+    result = str(value).strip()
+    if not result:
+        return None
+    if len(result) > 80:
+        raise ValueError("Provider round must not exceed 80 characters.")
+    return result
+
+
 def convert_provider_match(match: dict[str, Any]) -> dict[str, Any]:
     """Convert one BigBallsData fixture into consistent identity fields."""
     if not isinstance(match, dict):
@@ -68,14 +81,18 @@ def convert_provider_match(match: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Provider score must be an object or missing.")
     home_score = score.get("home") if score else None
     away_score = score.get("away") if score else None
+    kickoff_value = match.get("kickoff_utc")
+    kickoff_has_time = (
+        isinstance(kickoff_value, str)
+        and re.search(r"\d{2}:\d{2}", kickoff_value) is not None
+    )
     return {
         "provider_match_id": match_id,
         "sport": sport,
         "league": league,
-        "match_date": _utc_datetime(
-            match.get("kickoff_utc"),
-            "kickoff_utc",
-        ),
+        "match_date": _utc_datetime(kickoff_value, "kickoff_utc"),
+        "round_name": _optional_round(match.get("round")),
+        "kickoff_time_available": kickoff_has_time,
         "status": _required_text(match.get("status"), "provider match status"),
         "home_team_id": home.get("id"),
         "home_team_name": home_name,
@@ -244,7 +261,7 @@ def convert_match_statistics(
         provider_match.get("away_team_id"),
         provider_match["away_team_name"],
     )
-    return {
+    statistics = {
         **(home or {
             "home_possession": None,
             "home_shots": None,
@@ -255,16 +272,11 @@ def convert_match_statistics(
             "away_shots": None,
             "away_shots_on_target": None,
         }),
-        "available": available_flag is not False
-        and any(
-            value is not None
-            for value in (
-                (home or {}).get("home_possession"),
-                (home or {}).get("home_shots"),
-                (home or {}).get("home_shots_on_target"),
-                (away or {}).get("away_possession"),
-                (away or {}).get("away_shots"),
-                (away or {}).get("away_shots_on_target"),
-            )
-        ),
+    }
+    if available_flag is False:
+        statistics = {field: None for field in STATISTIC_FIELDS}
+
+    return {
+        **statistics,
+        "available": any(value is not None for value in statistics.values()),
     }

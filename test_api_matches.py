@@ -214,6 +214,26 @@ def test_missing_match_statistics_are_returned_as_null(api_client):
     }
 
 
+def test_match_list_filters_by_round(api_client):
+    client, database_engine = api_client
+    first_id = create_match(database_engine)
+    second_id = create_match(
+        database_engine,
+        home_name="Napoli",
+        away_name="Milan",
+    )
+    with create_database_session(database_engine) as session:
+        session.get(Match, first_id).round_name = "Round 1"
+        session.get(Match, second_id).round_name = "Round 2"
+        session.commit()
+
+    response = client.get("/api/matches", params={"round": "Round 2"})
+
+    assert response.status_code == 200
+    assert [match["id"] for match in response.json()] == [second_id]
+    assert response.json()[0]["round"] == "Round 2"
+
+
 def test_unknown_match_id_returns_404(api_client):
     client, _database_engine = api_client
 

@@ -31,7 +31,6 @@ def test_frontend_static_files_are_available():
     file_paths = [
         "/css/style.css",
         "/js/app.js",
-        "/js/demo-data.js",
         "/js/formation-layout.js",
         "/assets/logo.svg",
         "/assets/stadium.jpg",
