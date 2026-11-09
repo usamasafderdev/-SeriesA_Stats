@@ -88,6 +88,36 @@ def _player_record(
         "shots_on_target": _integer_or_none(
             player_data.get("shots_on_target"), "shots_on_target"
         ),
+        "shots_off_target": _integer_or_none(
+            player_data.get("shots_off_target"), "shots_off_target"
+        ),
+        "passes_total": _integer_or_none(player_data.get("passes_total"), "passes_total"),
+        "passes_successful": _integer_or_none(
+            player_data.get("passes_successful"), "passes_successful"
+        ),
+        "passes_accuracy": player_data.get("passes_accuracy"),
+        "passes_key": _integer_or_none(player_data.get("passes_key"), "passes_key"),
+        "tackles_total": _integer_or_none(
+            player_data.get("tackles_total"), "tackles_total"
+        ),
+        "interceptions_total": _integer_or_none(
+            player_data.get("interceptions_total"), "interceptions_total"
+        ),
+        "dribbles_total": _integer_or_none(
+            player_data.get("dribbles_total"), "dribbles_total"
+        ),
+        "dribbles_successful": _integer_or_none(
+            player_data.get("dribbles_successful"), "dribbles_successful"
+        ),
+        "duels_total": _integer_or_none(player_data.get("duels_total"), "duels_total"),
+        "duels_won": _integer_or_none(player_data.get("duels_won"), "duels_won"),
+        "fouls_committed": _integer_or_none(
+            player_data.get("fouls_committed"), "fouls_committed"
+        ),
+        "fouls_drawn": _integer_or_none(player_data.get("fouls_drawn"), "fouls_drawn"),
+        "goalkeeper_saves": _integer_or_none(
+            player_data.get("goalkeeper_saves"), "goalkeeper_saves"
+        ),
     }
     player_fields.update(
         {

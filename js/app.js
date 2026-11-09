@@ -215,30 +215,16 @@
     const goals = scored.reduce(function (sum, item) { return sum + item.home_score + item.away_score; }, 0);
     const teams = new Set();
     matches.forEach(function (item) { teams.add(item.home_team_name); teams.add(item.away_team_name); });
-    const possession = [];
-    matches.forEach(function (item) {
-      ["home_possession", "away_possession"].forEach(function (key) {
-        if (item.statistics && item.statistics[key] != null) possession.push(item.statistics[key]);
-      });
-    });
-    const avgPossession = possession.length
-      ? (possession.reduce(function (sum, value) { return sum + value; }, 0) / possession.length).toFixed(1) + "%"
-      : "Not available";
-    const completeAssists = matches.filter(function (item) {
-      return item.home_assists != null && item.away_assists != null;
-    });
-    const assistTotal = completeAssists.reduce(function (sum, item) {
-      return sum + item.home_assists + item.away_assists;
-    }, 0);
-    const rows = matchRows(matches, false);
+    const rows = matchRows(matches.slice(0, 5), false);
+    const latest = matches[0];
+    const latestResult = latest ? formatScore(latest) + " · " + latest.home_team_name + " vs " + latest.away_team_name : "Not available";
     return '<div class="welcome-row"><div><p class="section-kicker">SAVED LIVE RECORDS</p><p class="muted">All figures below come from records stored in SQLite.</p><p class="live-status">' +
       escapeHtml(lastUpdated(matches)) + '</p></div>' +
       '<button class="button button-secondary" data-action="navigate" data-screen="matches">Browse matches ' + icon("arrow-up-right", 15) + "</button></div>" +
-      '<div class="stats-grid">' + statCard("Matches", matches.length, "In selected season", "calendar-days", "cyan") +
+      '<div class="stats-grid">' + statCard("Completed matches", matches.length, "Finished official results", "calendar-days", "cyan") +
       statCard("Goals", scored.length ? goals : "Not available", scored.length + " matches with scores", "goal", "blue") +
-      statCard("Assists", completeAssists.length ? assistTotal : "Not available",
-        "Complete player records for " + completeAssists.length + " matches", "users-round", "indigo") +
-      statCard("Avg. possession", avgPossession, "From available post-match values", "chart-no-axes-column-increasing", "violet") + "</div>" +
+      statCard("Teams", teams.size, "Distinct teams in results", "shield", "indigo") +
+      statCard("Latest result", latestResult, latest ? formatDate(latest.match_date) : "No completed results", "trophy", "violet") + "</div>" +
       (rows ? '<section class="panel table-panel"><div class="panel-heading"><div><h2>Recent Matches</h2><p>Saved provider records</p></div><button class="text-button" data-action="navigate" data-screen="matches">View all ' + icon("arrow-right", 14) + "</button></div>" +
         '<div class="table-wrap"><table><thead><tr><th>Date / Status</th><th>Home Team</th><th>Score</th><th>Away Team</th><th>Actions</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>" :
         emptyState("No live Serie A matches have been imported. Import a small fixture list below to begin.")) + importPanel();
@@ -328,6 +314,7 @@
         (state.actionMessage ? '<p class="muted" role="status">' + escapeHtml(state.actionMessage) + "</p>" : "") +
         '<button class="button button-secondary" data-action="load-lineups">Load saved lineups</button>' +
         '<button class="button button-primary" data-action="import-lineups">Fetch player lineup</button>' +
+        '<button class="button button-secondary" data-action="import-player-details">Fetch player details</button>' +
         '<button class="button button-secondary" data-action="open-pitch">Open football pitch</button></div>' +
         '<div class="lineups-grid">' + lineupCards() + "</div>";
     } else {
@@ -419,19 +406,26 @@
       const list = values[key];
       return list.length ? (list.reduce(function (sum, value) { return sum + value; }, 0) / list.length).toFixed(1) : "Not available";
     }
+    const availableMetrics = {
+      possession: values.possession.length > 0,
+      shots: values.shots.length > 0,
+      target: values.target.length > 0
+    };
     return {
       record: record,
       possession: average("possession"),
       shots: average("shots"),
       target: average("target"),
+      availableMetrics: availableMetrics,
       assists: matchesWithAssists ? assists : "Not available",
       assistsNote: matchesWithAssists + " of " + record.allMatches.length + " matches with complete assist records"
     };
   }
 
-  function chartTabs() {
+  function chartTabs(stats) {
     const metrics = [["goals", "Goals"], ["points", "Points"], ["possession", "Possession"], ["shots", "Shots"], ["target", "On target"]];
     return metrics.map(function (entry) {
+      if (entry[0] !== "goals" && entry[0] !== "points" && !stats.availableMetrics[entry[0]]) return "";
       return '<button class="chart-tab' + (state.chartMetric === entry[0] ? " active" : "") +
         '" data-action="chart-tab" data-metric="' + entry[0] + '">' + entry[1] + "</button>";
     }).join("");
@@ -442,6 +436,9 @@
     if (!names.length) return emptyState("Team statistics are unavailable until live fixtures are imported.");
     if (!names.includes(state.team)) state.team = names[0];
     const stats = teamStats(state.team);
+    if (state.chartMetric !== "goals" && state.chartMetric !== "points" && !stats.availableMetrics[state.chartMetric]) {
+      state.chartMetric = stats.availableMetrics.goals ? "goals" : "points";
+    }
     return '<div class="team-toolbar panel"><div><label class="team-select-label" for="team-choice">Select Team</label><div class="team-picker">' +
       badge(state.team) + '<select class="select" id="team-choice" data-change="team">' +
       names.map(function (name) { return '<option value="' + escapeHtml(name) + '"' + (name === state.team ? " selected" : "") + ">" + escapeHtml(name) + "</option>"; }).join("") +
@@ -458,8 +455,12 @@
       escapeHtml(stats.shots) + "</b></div><div><span>Avg. Shots on Target</span><b>" +
       escapeHtml(stats.target) + "</b></div></div></section>" +
       '<section class="panel chart-panel"><div class="chart-panel-head"><div><h2>Team Performance</h2><p>Actual saved match values · missing values are gaps</p></div><div class="chart-tabs">' +
-      chartTabs() + '</div></div><div class="chart-canvas-wrap"><canvas id="team-chart" role="img" aria-label="Chart of saved match statistics for ' +
-      escapeHtml(state.team) + '"></canvas></div></section></div>';
+      chartTabs(stats) + '</div></div>' +
+      (stats.availableMetrics[state.chartMetric] || state.chartMetric === "goals" || state.chartMetric === "points"
+        ? '<div class="chart-canvas-wrap"><canvas id="team-chart" role="img" aria-label="Chart of saved match statistics for ' +
+          escapeHtml(state.team) + '"></canvas></div>'
+        : '<p class="metric-unavailable">No genuine saved values are available for this metric.</p>') +
+      '</section></div>';
   }
 
   function leagueRows() {
@@ -602,10 +603,19 @@
       escapeHtml(selected.player.position || "Position not available") + " · No. " +
       escapeHtml(selected.player.shirt_number == null ? "Not available" : selected.player.shirt_number) +
       '</p><div class="player-stat-list">' +
-      [["Goals", selected.player.goals], ["Assists", selected.player.assists],
-        ["Yellow cards", selected.player.yellow_cards], ["Red cards", selected.player.red_cards],
-        ["Minutes on", selected.player.minute_on == null ? null : selected.player.minute_on + "'"],
-        ["Minutes off", selected.player.minute_off == null ? null : selected.player.minute_off + "'"]]
+      [["Rating", selected.player.rating], ["Minutes played", selected.player.minutes_played],
+        ["Goals", selected.player.goals], ["Assists", selected.player.assists],
+        ["Shots", selected.player.shots_total], ["Shots on target", selected.player.shots_on_target],
+        ["Shots off target", selected.player.shots_off_target],
+        ["Passes", selected.player.passes_total], ["Successful passes", selected.player.passes_successful],
+        ["Pass accuracy", selected.player.passes_accuracy],
+        ["Key passes", selected.player.passes_key], ["Tackles", selected.player.tackles_total],
+        ["Interceptions", selected.player.interceptions_total],
+        ["Dribbles", selected.player.dribbles_total], ["Successful dribbles", selected.player.dribbles_successful],
+        ["Duels", selected.player.duels_total], ["Duels won", selected.player.duels_won],
+        ["Fouls committed", selected.player.fouls_committed], ["Fouls drawn", selected.player.fouls_drawn],
+        ["Saves", selected.player.goalkeeper_saves],
+        ["Yellow cards", selected.player.yellow_cards], ["Red cards", selected.player.red_cards]]
         .map(function (entry) {
           return "<span>" + entry[0] + "<b>" + escapeHtml(entry[1] == null ? "Not available" : entry[1]) + "</b></span>";
         }).join("") + "</div></section>" :
@@ -879,6 +889,23 @@
       state.actionMessage = error.message || "Lineup import failed. No retry was attempted.";
       render();
     }
+
+    async function importPlayerDetails() {
+      if (!state.matchDetails) return;
+      if (!window.confirm("Authorize one Highlightly box-score request and one events request for this match? No retry will be made.")) return;
+      state.actionMessage = "Fetching confirmed player details and events…";
+      render();
+      try {
+        const result = await post("/api/matches/" + state.matchDetails.id + "/highlightly-details/import", { confirmed: true });
+        state.matchDetails = result.details;
+        state.actionMessage = "Saved " + result.player_records_updated + " player records and " + result.events_imported + " events.";
+        state.lineups = await request("/api/matches/" + state.matchDetails.id + "/lineups");
+        render();
+      } catch (error) {
+        state.actionMessage = error.message || "Player details import failed. No retry was attempted.";
+        render();
+      }
+    }
   }
 
   app.addEventListener("click", function (event) {
@@ -916,6 +943,8 @@
       loadLineups();
     } else if (action === "import-lineups") {
       importLineups();
+    } else if (action === "import-player-details") {
+      importPlayerDetails();
     } else if (action === "open-pitch") {
       state.screen = "lineup";
       if (!state.lineups) loadLineups();

@@ -63,6 +63,8 @@ def test_database_tables_are_created(database_session):
         "match_lineups",
         "lineup_players",
         "saved_matches",
+        "league_standings",
+        "match_events",
     }
 
 

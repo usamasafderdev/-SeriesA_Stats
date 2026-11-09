@@ -37,7 +37,11 @@ from app.football_api import (
 )
 from app.lineup_import import convert_and_save_api_lineups
 from app.highlightly_api import HighlightlyClient, HighlightlyError, MissingHighlightlyKeyError
-from app.highlightly_import import convert_highlightly_lineups, save_highlightly_lineups
+from app.highlightly_import import (
+    convert_highlightly_lineups,
+    merge_highlightly_box_score,
+    save_highlightly_lineups,
+)
 from app.striker_match_matching import find_matching_striker_game
 from app.match_import import save_api_matches
 from app.match_service import (
@@ -79,6 +83,13 @@ class LineupImportRequest(BaseModel):
     confirmed: bool = Field(
         default=False,
         description="Confirm the estimated 5-credit get_lineups request.",
+    )
+
+
+class HighlightlyDetailsImportRequest(BaseModel):
+    confirmed: bool = Field(
+        default=False,
+        description="Confirm one box-score and one events request.",
     )
 
 
@@ -917,6 +928,20 @@ def _lineup_details(match_record: models.Match) -> dict:
                     "minutes_played": player.minutes_played,
                     "shots_total": player.shots_total,
                     "shots_on_target": player.shots_on_target,
+                    "shots_off_target": player.shots_off_target,
+                    "passes_total": player.passes_total,
+                    "passes_successful": player.passes_successful,
+                    "passes_accuracy": player.passes_accuracy,
+                    "passes_key": player.passes_key,
+                    "tackles_total": player.tackles_total,
+                    "interceptions_total": player.interceptions_total,
+                    "dribbles_total": player.dribbles_total,
+                    "dribbles_successful": player.dribbles_successful,
+                    "duels_total": player.duels_total,
+                    "duels_won": player.duels_won,
+                    "fouls_committed": player.fouls_committed,
+                    "fouls_drawn": player.fouls_drawn,
+                    "goalkeeper_saves": player.goalkeeper_saves,
                 }
             )
         lineup_records.append(
@@ -1019,6 +1044,44 @@ def get_match_lineups(
     if match_record is None:
         raise HTTPException(status_code=404, detail="Match not found.")
     return _lineup_details(match_record)
+
+
+@app.post("/api/matches/{match_id}/highlightly-details/import")
+def import_highlightly_details(
+    match_id: int,
+    request: HighlightlyDetailsImportRequest,
+    session: Session = Depends(get_database_session),
+) -> dict:
+    """Fetch and cache Highlightly player metrics and events on demand."""
+    match_record = find_match_by_id(session, match_id, data_source="live")
+    if match_record is None or match_record.highlightly_match_id is None:
+        raise HTTPException(status_code=404, detail="Highlightly match identity is unavailable.")
+    if not request.confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Set confirmed=true to authorize one box-score and one events request.",
+        )
+    try:
+        client = HighlightlyClient()
+        box_score = client.get_box_score(int(match_record.highlightly_match_id))
+        events = client.get_events(int(match_record.highlightly_match_id))
+        players = [
+            player
+            for lineup in match_record.lineups
+            for player in lineup.players
+        ]
+        updated = merge_highlightly_box_score(players, box_score)
+        event_count = _save_highlightly_events(session, match_record, events)
+        session.commit()
+        return {
+            "match_id": match_id,
+            "player_records_updated": updated,
+            "events_imported": event_count,
+            "details": _match_details(match_record),
+        }
+    except (HighlightlyError, ValueError) as error:
+        session.rollback()
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.post("/api/matches/{match_id}/lineups/import")

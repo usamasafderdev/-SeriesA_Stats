@@ -20,6 +20,21 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
+def _stat(player_stats: dict[str, Any], *names: str) -> Any:
+    return _first_present(*(player_stats.get(name) for name in names))
+
+
+def _percentage(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip().removesuffix("%").strip()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _player(value: dict[str, Any], stats: dict[str, Any] | None = None) -> dict[str, Any]:
     player_stats = (stats or {}).get("statistics", stats or {}) if isinstance(stats, dict) else {}
     player_stats = player_stats or value.get("statistics") or {}
@@ -33,12 +48,26 @@ def _player(value: dict[str, Any], stats: dict[str, Any] | None = None) -> dict[
         "minute_off": value.get("minuteOff"),
         "rating": _first_present(value.get("rating"), value.get("matchRating")),
         "minutes_played": _first_present(value.get("minutesPlayed"), value.get("minutes")),
-        "shots_total": _first_present(player_stats.get("shotsTotal"), player_stats.get("totalShots")),
-        "shots_on_target": player_stats.get("shotsOnTarget"),
-        "goals": _first_present(player_stats.get("goals"), player_stats.get("goalsScored")),
-        "assists": player_stats.get("assists"),
-        "yellow_cards": _first_present(player_stats.get("yellowCards"), player_stats.get("cardsYellow")),
-        "red_cards": _first_present(player_stats.get("redCards"), player_stats.get("cardsRed")),
+        "shots_total": _stat(player_stats, "shotsTotal", "totalShots"),
+        "shots_on_target": _stat(player_stats, "shotsOnTarget"),
+        "shots_off_target": _stat(player_stats, "shotsOffTarget"),
+        "goals": _stat(player_stats, "goals", "goalsScored"),
+        "assists": _stat(player_stats, "assists"),
+        "yellow_cards": _stat(player_stats, "yellowCards", "cardsYellow"),
+        "red_cards": _stat(player_stats, "redCards", "cardsRed"),
+        "passes_total": _stat(player_stats, "passesTotal"),
+        "passes_successful": _stat(player_stats, "passesSuccessful"),
+        "passes_accuracy": _percentage(_stat(player_stats, "passesAccuracy")),
+        "passes_key": _stat(player_stats, "passesKey"),
+        "tackles_total": _stat(player_stats, "tacklesTotal"),
+        "interceptions_total": _stat(player_stats, "interceptionsTotal"),
+        "dribbles_total": _stat(player_stats, "dribblesTotal"),
+        "dribbles_successful": _stat(player_stats, "dribblesSuccessful"),
+        "duels_total": _stat(player_stats, "duelsTotal"),
+        "duels_won": _stat(player_stats, "duelsWon"),
+        "fouls_committed": _stat(player_stats, "foulsCommitted", "fouls"),
+        "fouls_drawn": _stat(player_stats, "foulsDrawn"),
+        "goalkeeper_saves": _stat(player_stats, "saves", "goalkeeperSaves"),
     }
 
 
@@ -112,6 +141,45 @@ def convert_highlightly_lineups(
     ):
         raise ValueError("Highlightly lineups do not match the stored home and away teams.")
     return normalized
+
+
+def merge_highlightly_box_score(
+    players: list[Any],
+    box_score: Any,
+) -> int:
+    """Merge supplied Highlightly metrics onto already-cached lineup players."""
+    box_players = [
+        player
+        for team in box_score if isinstance(team, dict)
+        for player in _list(team.get("players"))
+    ] if isinstance(box_score, list) else _list(
+        box_score.get("players") if isinstance(box_score, dict) else []
+    )
+    by_id = {
+        str(item.get("id") or item.get("playerId")): item
+        for item in box_players
+        if item.get("id") is not None or item.get("playerId") is not None
+    }
+    updated = 0
+    for player in players:
+        source = by_id.get(str(player.api_player_id))
+        if source is None:
+            continue
+        stats = source.get("statistics") or {}
+        values = _player(source, {"statistics": stats})
+        for field in (
+            "rating", "minutes_played", "shots_total", "shots_on_target",
+            "shots_off_target", "goals", "assists", "yellow_cards", "red_cards",
+            "passes_total", "passes_successful", "passes_accuracy", "passes_key",
+            "tackles_total", "interceptions_total", "dribbles_total",
+            "dribbles_successful", "duels_total", "duels_won", "fouls_committed",
+            "fouls_drawn", "goalkeeper_saves",
+        ):
+            value = values.get(field)
+            if value is not None:
+                setattr(player, field, value)
+        updated += 1
+    return updated
 
 
 def _normalize(value: str) -> str:

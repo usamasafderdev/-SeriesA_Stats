@@ -133,6 +133,20 @@ def _add_provider_identity_columns(database_engine: Engine) -> None:
             "minutes_played": "INTEGER",
             "shots_total": "INTEGER",
             "shots_on_target": "INTEGER",
+            "shots_off_target": "INTEGER",
+            "passes_total": "INTEGER",
+            "passes_successful": "INTEGER",
+            "passes_accuracy": "FLOAT",
+            "passes_key": "INTEGER",
+            "tackles_total": "INTEGER",
+            "interceptions_total": "INTEGER",
+            "dribbles_total": "INTEGER",
+            "dribbles_successful": "INTEGER",
+            "duels_total": "INTEGER",
+            "duels_won": "INTEGER",
+            "fouls_committed": "INTEGER",
+            "fouls_drawn": "INTEGER",
+            "goalkeeper_saves": "INTEGER",
         }.items():
             if column_name not in lineup_columns:
                 connection.execute(
