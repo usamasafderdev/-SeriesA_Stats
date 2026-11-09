@@ -226,6 +226,16 @@ td:last-child { border-right: 1px solid rgba(157,181,218,.08); border-radius: 0 
 .substitute-player small { color: #8092ad; font-size: 8px; text-transform: capitalize; }
 .substitute-number { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; border-radius: 50%; background: #213957; color: #c1e0ff; font-weight: 700; }
 .lineup-footnote { line-height: 1.6; }
+.app-notification { position: fixed; right: 18px; bottom: 18px; z-index: 50; max-width: min(520px,calc(100vw - 36px)); padding: 12px 16px; border: 1px solid #315278; border-radius: 9px; background: #12243d; color: #dceafb; font-size: 12px; box-shadow: 0 6px 24px #0005; }
+.rating-indicator { background: #b8f6d5; color: #075332; }
+.player-name-button { border: 0; padding: 0; background: none; color: #badeff; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.lineups-grid .football-pitch { aspect-ratio: .85; min-height: 410px; }
+.lineups-grid .pitch-player { width: 18%; max-width: 82px; min-width: 46px; }
+.lineups-grid .pitch-name { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-size: 10px; line-height: 1.2; }
+.lineups-grid .pitch-role { font-size: 8px; }
+.pitch-player:focus-visible, .substitute-player:focus-visible { outline: 2px solid #93d5ff; outline-offset: 3px; }
+.match-list-import .events-option { display: flex; align-items: center; gap: 7px; min-width: 100px; }
+.events-option input { min-height: auto; }
 .live-lineup-panel { padding: 14px; }
 .live-lineup-panel .panel-heading { margin-bottom: 10px; }
 .live-lineup-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }

@@ -1,7 +1,11 @@
 from datetime import datetime
 
 from app.database import create_database_engine, create_database_session, initialize_database
-from app.highlightly_import import convert_highlightly_lineups, save_highlightly_lineups
+from app.highlightly_import import (
+    _same_team_name,
+    convert_highlightly_lineups,
+    save_highlightly_lineups,
+)
 from app.match_service import add_match, add_team
 from app.models import LineupPlayer, MatchLineup
 
@@ -61,3 +65,18 @@ def test_highlightly_lineups_persist_against_local_teams(tmp_path):
         assert session.query(MatchLineup).count() == 2
         assert session.query(LineupPlayer).count() == 22
     engine.dispose()
+
+
+def test_highlightly_team_alias_matches_qualified_name():
+    assert _same_team_name("Napoli", "SSC Napoli")
+    assert _same_team_name("Genoa", "Genoa CFC")
+    assert _same_team_name("Atalanta", "Atalanta BC")
+    assert all(
+        _same_team_name(name, "Inter")
+        for name in (
+            "FC Internazionale Milano",
+            "Inter Milan",
+            "Internazionale Milano",
+            "Internazionale",
+        )
+    )

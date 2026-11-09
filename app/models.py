@@ -6,6 +6,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     UniqueConstraint,
     event,
@@ -173,11 +174,46 @@ class MatchEvent(Base):
     match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
     provider_event_id = Column(String(100), nullable=True)
     minute = Column(Integer, nullable=True)
+    added_minute = Column(Integer, nullable=True)
+    source = Column(String(40), nullable=True)
     event_type = Column(String(40), nullable=False)
     team_name = Column(String(100), nullable=True)
     player_name = Column(String(100), nullable=True)
     assist_name = Column(String(100), nullable=True)
     detail = Column(String(200), nullable=True)
+
+
+class HighlightlyResponse(Base):
+    """Durable provider responses, shared by fixtures on the same date."""
+    __tablename__ = "highlightly_responses"
+    cache_key = Column(String(180), primary_key=True)
+    payload = Column(JSON, nullable=False)
+    fetched_at = Column(DateTime, nullable=False)
+
+
+class HighlightlyRequest(Base):
+    """A durable request ledger also records failed and interrupted attempts."""
+    __tablename__ = "highlightly_requests"
+    cache_key = Column(String(180), primary_key=True)
+    status = Column(String(30), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(String(300), nullable=True)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class MatchDetailSync(Base):
+    __tablename__ = "match_detail_sync"
+    match_id = Column(Integer, ForeignKey("matches.id"), primary_key=True)
+    provider_match_id = Column(String(100), nullable=True)
+    status = Column(String(30), nullable=False, default="pending")
+    statistics_complete = Column(Boolean, nullable=False, default=False)
+    lineup_complete = Column(Boolean, nullable=False, default=False)
+    player_performance_complete = Column(Boolean, nullable=False, default=False)
+    events_complete = Column(Boolean, nullable=False, default=False)
+    requests_used = Column(Integer, nullable=False, default=0)
+    last_error = Column(String(300), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+    match = relationship("Match")
 
 
 class MatchLineup(Base):
@@ -194,6 +230,9 @@ class MatchLineup(Base):
     match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     formation = Column(String(20), nullable=True)
+    source = Column(String(40), nullable=True)
+    provider_match_id = Column(String(100), nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
 
     match = relationship("Match", back_populates="lineups")
     team = relationship("Team", back_populates="lineups")

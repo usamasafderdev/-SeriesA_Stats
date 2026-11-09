@@ -11,14 +11,17 @@
     chartMetric: "goals",
     detailTab: "overview",
     matches: [],
+    coverage: null,
     standings: [],
     savedMatches: [],
     matchDetails: null,
     lineups: null,
     detailLoading: false,
     loading: true,
+    busy: false,
     error: "",
     actionMessage: "",
+    pendingApproval: null,
     chart: null
   };
   const navItems = [
@@ -105,6 +108,20 @@
     });
   }
 
+  function leagueMatches() {
+    return state.matches.filter(function (item) {
+      return item.status === "finished" && (state.season === "all" || item.season === state.season);
+    }).sort(function (a, b) { return String(b.match_date).localeCompare(String(a.match_date)); });
+  }
+
+  function activeSeason() {
+    return state.season === "all" ? seasonList()[0] : state.season;
+  }
+
+  function officialStandings() {
+    return state.standings.filter(function (row) { return row.season === activeSeason(); });
+  }
+
   function matchScreenRecords() {
     return selectedMatches().filter(function (item) {
       return state.round === "all" || item.round === state.round;
@@ -156,7 +173,7 @@
       saved: "Saved Matches", about: "About this tracker"
     };
     const active = state.screen;
-    return '<div class="app-shell"><aside class="sidebar">' +
+    return (state.actionMessage ? '<div class="app-notification" role="status">' + escapeHtml(state.actionMessage) + "</div>" : "") + '<div class="app-shell"><aside class="sidebar">' +
       '<a class="brand-lockup" href="#" data-action="navigate" data-screen="dashboard"><img src="assets/logo.svg" alt="" class="brand-logo"><span><strong>Serie A</strong><small>Match Tracker</small></span></a>' +
       '<nav class="side-nav" aria-label="Main navigation">' + navItems.map(function (item) {
         return '<button class="nav-link' + (active === item[0] || (["match", "lineup"].includes(active) && item[0] === "matches") ? " active" : "") +
@@ -168,7 +185,15 @@
       (titles[active] || "Serie A Tracker") + '</h1></div><div class="topbar-actions">' +
       (["about", "lineup"].includes(active) ? "" : seasonSelect()) +
       '<button class="mobile-menu icon-button" data-action="menu" aria-label="Toggle navigation">' + icon("menu") + "</button></div></header>" +
-      '<section class="page-content">' + content + '</section><footer class="page-footer">Independent tracker · Unaffiliated with any league or club</footer></main></div>';
+      '<section class="page-content">' + approvalPanel() + content + '</section><footer class="page-footer">Independent tracker · Unaffiliated with any league or club</footer></main></div>';
+  }
+
+  function approvalPanel() {
+    if (!state.pendingApproval) return "";
+    return '<section class="panel approval-panel" role="alert"><div><strong>Provider request approval</strong><p>' +
+      escapeHtml(state.pendingApproval.message) + '</p><small>No automatic retries. Requests are made only after approval.</small></div>' +
+      '<div class="row-actions"><button class="button button-primary" data-action="approve-request">Approve request</button>' +
+      '<button class="button button-secondary" data-action="cancel-request">Cancel</button></div></section>';
   }
 
   function statCard(label, value, note, iconName, tone) {
@@ -179,18 +204,6 @@
 
   function emptyState(message) {
     return '<div class="panel empty-state live-empty" role="status">' + escapeHtml(message) + "</div>";
-  }
-
-  function importPanel() {
-    const year = String(new Date().getUTCFullYear());
-    return '<section class="panel live-lineup-panel"><div class="panel-heading"><div><h2>Sync current-season fixtures</h2><p>No provider request is made until you press the button and confirm.</p></div></div>' +
-      '<div class="match-list-import"><label><span>Season start year</span><input id="import-season" value="' + year + '" inputmode="numeric" maxlength="4"></label>' +
-      '<button class="button button-primary" data-action="import-matches">Sync BBS fixtures</button>' +
-      '<button class="button button-primary" data-action="sync-football-data">Sync fixtures + standings</button>' +
-      '<button class="button button-secondary" data-action="refresh-matches">Refresh latest fixtures</button>' +
-      '<button class="button button-secondary" data-action="refresh-local">Refresh saved records</button>' +
-      '<small>Uses up to five paginated BigBallsData requests, up to 200 fixtures per page. No automatic retries.</small></div>' +
-      (state.actionMessage ? '<p class="live-status" role="status">' + escapeHtml(state.actionMessage) + "</p>" : "") + "</section>";
   }
 
   function matchRows(matches, saved) {
@@ -209,8 +222,8 @@
 
   function dashboard() {
     if (state.loading) return emptyState("Loading saved match records…");
-    if (state.error) return emptyState(state.error) + importPanel();
-    const matches = selectedMatches();
+    if (state.error) return emptyState(state.error);
+    const matches = leagueMatches();
     const scored = matches.filter(function (item) { return item.home_score != null && item.away_score != null; });
     const goals = scored.reduce(function (sum, item) { return sum + item.home_score + item.away_score; }, 0);
     const teams = new Set();
@@ -225,14 +238,22 @@
       statCard("Goals", scored.length ? goals : "Not available", scored.length + " matches with scores", "goal", "blue") +
       statCard("Teams", teams.size, "Distinct teams in results", "shield", "indigo") +
       statCard("Latest result", latestResult, latest ? formatDate(latest.match_date) : "No completed results", "trophy", "violet") + "</div>" +
+      (state.coverage ? '<section class="panel coverage-panel"><div class="panel-heading"><div><h2>Verified detail coverage</h2><p>Cached records only · no requests made by opening this page</p></div></div>' +
+        '<div class="number-grid"><div><span>Detailed statistics</span><b>' + state.coverage.detailed_statistics + " / " + state.coverage.completed_fixtures +
+        '</b></div><div><span>Lineups</span><b>' + state.coverage.lineups + " / " + state.coverage.completed_fixtures +
+        '</b></div><div><span>Player performance</span><b>' + state.coverage.player_performance + " / " + state.coverage.completed_fixtures +
+        '</b></div><div><span>Events</span><b>' + state.coverage.events + " / " + state.coverage.completed_fixtures + "</b></div></div>" +
+        '<div class="match-list-import"><label><span>Matches this batch</span><input id="highlightly-max-matches" type="number" min="1" max="10" value="1"></label>' +
+        '<label><span>Request budget</span><input id="highlightly-max-requests" type="number" min="1" max="40" value="5"></label>' +
+        '<label class="events-option"><input id="highlightly-include-events" type="checkbox">Include events</label><button class="button button-secondary" data-action="sync-highlightly">Review missing data</button></div></section>' : "") +
       (rows ? '<section class="panel table-panel"><div class="panel-heading"><div><h2>Recent Matches</h2><p>Saved provider records</p></div><button class="text-button" data-action="navigate" data-screen="matches">View all ' + icon("arrow-right", 14) + "</button></div>" +
         '<div class="table-wrap"><table><thead><tr><th>Date / Status</th><th>Home Team</th><th>Score</th><th>Away Team</th><th>Actions</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>" :
-        emptyState("No live Serie A matches have been imported. Import a small fixture list below to begin.")) + importPanel();
+        emptyState("No completed Serie A matches match the current filters."));
   }
 
   function matchesScreen() {
     if (state.loading) return emptyState("Loading saved match records…");
-    if (state.error) return emptyState(state.error) + importPanel();
+    if (state.error) return emptyState(state.error);
     const matches = matchScreenRecords();
     const rows = matchRows(matches, false);
     return '<div class="filter-bar panel"><label class="search-wrap">' + icon("search", 16) +
@@ -243,7 +264,7 @@
       escapeHtml(lastUpdated(matches)) + '</p></div><span class="result-count">' + matches.length + " RESULTS</span></div>" +
       '<div class="table-wrap"><table><thead><tr><th>Date / Status</th><th>Home Team</th><th>Score</th><th>Away Team</th><th>Actions</th></tr></thead><tbody>' +
       (rows || '<tr><td class="empty-state" colspan="5">' + (state.matches.length ? "No saved matches match these filters." : "No live fixtures have been imported yet.") + "</td></tr>") +
-      "</tbody></table></div></section>" + importPanel();
+      "</tbody></table></div></section>";
   }
 
   function valueText(value, suffix) {
@@ -251,6 +272,7 @@
   }
 
   function comparisonBar(label, left, right, unit) {
+    if (left == null && right == null) return "";
     if (left == null || right == null) {
       return '<div class="comparison-row"><div class="compare-values"><b>' + valueText(left, unit) + "</b><span>" +
         label + "</span><b>" + valueText(right, unit) + '</b></div><div class="metric-unavailable">One or both values are not available.</div></div>';
@@ -275,11 +297,12 @@
     if (!state.lineups) return emptyState("Lineups have not been loaded yet.");
     const cards = (state.lineups.lineups || []).map(function (lineup) {
       const players = lineup.starting_players || [];
+      if (!players.length) return '<section class="panel detail-panel"><h2>' + escapeHtml(lineup.team_name) + '</h2><p class="muted">Starting XI not supplied.</p></section>';
       return '<section class="panel detail-panel"><div class="panel-heading"><div><h2>' + escapeHtml(lineup.team_name) +
-        '</h2><p>' + escapeHtml(lineup.formation || "Formation not provided") + " · starting XI</p></div>" +
+        '</h2><p>' + escapeHtml(lineup.formation || "Formation not supplied") + " · starting XI</p></div>" +
         badge(lineup.team_name) + '</div><ol class="lineup-list">' + players.map(function (player) {
           return "<li><span>" + escapeHtml(player.shirt_number == null ? "—" : player.shirt_number) + "</span>" +
-              escapeHtml(player.name) +
+              '<button class="player-name-button" data-action="select-player" data-player-id="' + escapeHtml(player.id) + '">' + escapeHtml(player.name) + "</button>" +
               (player.rating == null ? "" : " <small class=\"muted\">★ " + escapeHtml(player.rating) + "</small>") +
               "</li>";
         }).join("") + "</ol></section>";
@@ -299,9 +322,10 @@
     let active;
     if (state.detailTab === "events") {
       const eventRows = (item.events || []).map(function (event) {
-        return "<li><b>" + escapeHtml(event.minute == null ? "—" : event.minute + "'") + "</b> " +
+        return "<li><b>" + escapeHtml(event.minute == null ? "—" : (event.minute + (event.added_minute == null ? "" : "+" + event.added_minute) + "'")) + "</b> " +
           escapeHtml(event.type) + " · " + escapeHtml(event.player_name || "Player unavailable") +
-          (event.assist_name ? " (" + escapeHtml(event.assist_name) + ")" : "") +
+          (event.assist_name ? " (assist: " + escapeHtml(event.assist_name) + ")" : "") +
+          (event.detail ? " - " + escapeHtml(event.detail) : "") +
           (event.team_name ? " · " + escapeHtml(event.team_name) : "") + "</li>";
       }).join("");
       active = '<div class="detail-grid">' +
@@ -310,28 +334,24 @@
         contributionPanel("Goal scorers", item.goal_scorers, "goals") +
         contributionPanel("Assists", item.goal_assists, "assists") + "</div>";
     } else if (state.detailTab === "lineups") {
-      active = '<div class="lineup-open-row"><p>Saved permitted provider player records only. No provider request is made by opening this tab.</p>' +
+      active = '<div class="lineup-open-row"><p>Saved starting XIs, substitutes and player performance. Opening this tab reads local records.</p>' +
         (state.actionMessage ? '<p class="muted" role="status">' + escapeHtml(state.actionMessage) + "</p>" : "") +
         '<button class="button button-secondary" data-action="load-lineups">Load saved lineups</button>' +
         '<button class="button button-primary" data-action="import-lineups">Fetch player lineup</button>' +
         '<button class="button button-secondary" data-action="import-player-details">Fetch player details</button>' +
-        '<button class="button button-secondary" data-action="open-pitch">Open football pitch</button></div>' +
+        '<button class="button button-secondary" data-action="open-pitch">View pitch &amp; player performance</button></div>' +
         '<div class="lineups-grid">' + lineupCards() + "</div>";
     } else {
-      const requests = item.bbs_match_id || item.statistics_provider_match_id ? 1 : 2;
-      const hasStats = item.statistics_source === "bigballsdata";
+      const hasStats = item.statistics_available;
       active = '<div class="detail-grid"><section class="panel detail-panel"><div class="panel-heading"><div><h2>Post-match Statistics</h2><p>' +
-        (hasStats ? "BigBallsData · stored values · " +
+        (hasStats ? escapeHtml(item.statistics_source || "Provider") + " · stored values · " +
           (formatTimestamp(item.statistics_fetched_at) || "Update time unavailable") : "No statistics saved yet") +
         '</p></div>' + icon("chart-no-axes-column-increasing", 17) + "</div>" +
         comparisonBar("Possession", stats.home_possession, stats.away_possession, "%") +
         comparisonBar("Total Shots", stats.home_shots, stats.away_shots, "") +
         comparisonBar("Shots on Target", stats.home_shots_on_target, stats.away_shots_on_target, "") +
-        '<div class="statistics-import-row"><div><p>This match requires ' + requests +
-        ' authenticated BigBallsData request' + (requests === 1 ? "" : "s") + '.</p><small>No automatic retries. Import only after confirmation.</small>' +
-        (state.actionMessage ? "<small>" + escapeHtml(state.actionMessage) + "</small>" : "") + "</div>" +
-        '<button class="button button-secondary" data-action="' + (hasStats ? "refresh-statistics" : "import-statistics") +
-        '">' + (hasStats ? "Refresh statistics" : "Import statistics") + "</button></div></section>" +
+        '<div class="statistics-import-row"><p>Only provider-supplied values are shown.</p>' +
+        '<button class="button button-secondary" data-action="import-statistics">Review missing statistics</button></div></section>' +
         '<section class="panel detail-panel"><div class="panel-heading"><div><h2>Score &amp; goals</h2><p>Final score is shown only when supplied by the provider.</p></div>' +
         icon("goal", 17) + "</div>" + contributionPanel("Goal scorers", item.goal_scorers, "goals") + "</section></div>";
     }
@@ -356,7 +376,7 @@
 
   function teamNames() {
     const names = new Set();
-    selectedMatches().forEach(function (match) {
+    leagueMatches().forEach(function (match) {
       names.add(match.home_team_name);
       names.add(match.away_team_name);
     });
@@ -364,10 +384,10 @@
   }
 
   function teamRecord(name) {
-    const matches = selectedMatches().filter(function (match) {
+    const matches = leagueMatches().filter(function (match) {
       return match.home_team_name === name || match.away_team_name === name;
     });
-    const result = { played: 0, wins: 0, draws: 0, losses: 0, goals: 0, points: 0, matches: [], allMatches: matches };
+    const result = { played: 0, wins: 0, draws: 0, losses: 0, goals: 0, goalsAgainst: 0, points: 0, matches: [], allMatches: matches };
     matches.forEach(function (match) {
       const isHome = match.home_team_name === name;
       const goalsFor = isHome ? match.home_score : match.away_score;
@@ -375,6 +395,7 @@
       if (goalsFor == null || goalsAgainst == null) return;
       result.played += 1;
       result.goals += goalsFor;
+      result.goalsAgainst += goalsAgainst;
       result.matches.push({ match: match, isHome: isHome });
       if (goalsFor > goalsAgainst) { result.wins += 1; result.points += 3; }
       else if (goalsFor === goalsAgainst) { result.draws += 1; result.points += 1; }
@@ -407,6 +428,8 @@
       return list.length ? (list.reduce(function (sum, value) { return sum + value; }, 0) / list.length).toFixed(1) : "Not available";
     }
     const availableMetrics = {
+      goals: record.played > 0,
+      points: record.played > 0,
       possession: values.possession.length > 0,
       shots: values.shots.length > 0,
       target: values.target.length > 0
@@ -417,6 +440,7 @@
       shots: average("shots"),
       target: average("target"),
       availableMetrics: availableMetrics,
+      sampleCounts: { possession: values.possession.length, shots: values.shots.length, target: values.target.length },
       assists: matchesWithAssists ? assists : "Not available",
       assistsNote: matchesWithAssists + " of " + record.allMatches.length + " matches with complete assist records"
     };
@@ -425,7 +449,7 @@
   function chartTabs(stats) {
     const metrics = [["goals", "Goals"], ["points", "Points"], ["possession", "Possession"], ["shots", "Shots"], ["target", "On target"]];
     return metrics.map(function (entry) {
-      if (entry[0] !== "goals" && entry[0] !== "points" && !stats.availableMetrics[entry[0]]) return "";
+      if (!stats.availableMetrics[entry[0]]) return "";
       return '<button class="chart-tab' + (state.chartMetric === entry[0] ? " active" : "") +
         '" data-action="chart-tab" data-metric="' + entry[0] + '">' + entry[1] + "</button>";
     }).join("");
@@ -436,27 +460,27 @@
     if (!names.length) return emptyState("Team statistics are unavailable until live fixtures are imported.");
     if (!names.includes(state.team)) state.team = names[0];
     const stats = teamStats(state.team);
-    if (state.chartMetric !== "goals" && state.chartMetric !== "points" && !stats.availableMetrics[state.chartMetric]) {
-      state.chartMetric = stats.availableMetrics.goals ? "goals" : "points";
+    if (!stats.availableMetrics[state.chartMetric]) {
+      state.chartMetric = ["goals", "points", "possession", "shots", "target"].find(function (key) { return stats.availableMetrics[key]; }) || null;
     }
     return '<div class="team-toolbar panel"><div><label class="team-select-label" for="team-choice">Select Team</label><div class="team-picker">' +
       badge(state.team) + '<select class="select" id="team-choice" data-change="team">' +
       names.map(function (name) { return '<option value="' + escapeHtml(name) + '"' + (name === state.team ? " selected" : "") + ">" + escapeHtml(name) + "</option>"; }).join("") +
-      '</select></div></div><div class="team-season">' + icon("calendar-days", 15) + " Imported results only · Season " + escapeHtml(state.season) + "</div></div>" +
+      '</select></div></div><div class="team-season">' + icon("calendar-days", 15) + " Imported results only · Season " + escapeHtml(activeSeason() || "unavailable") + "</div></div>" +
       '<div class="team-stat-grid">' + statCard("Played", stats.record.played, "Matches with a known score", "goal", "cyan") +
       statCard("Wins", stats.record.wins, "From saved scores", "trophy", "green") +
       statCard("Draws", stats.record.draws, "From saved scores", "equal", "blue") +
       statCard("Losses", stats.record.losses, "From saved scores", "circle-x", "rose") + "</div>" +
       '<div class="team-lower"><section class="panel team-number-panel"><div class="panel-heading"><div><h2>Performance Snapshot</h2><p>Calculated from selected season records</p></div></div>' +
       '<div class="number-grid"><div><span>Goals</span><b>' + (stats.record.played ? stats.record.goals : "Not available") + "</b></div>" +
-      '<div><span>Assists</span><b>' + escapeHtml(stats.assists) + "</b><small>" + escapeHtml(stats.assistsNote) +
-      '</small></div><div><span>Avg. Possession</span><b>' + escapeHtml(stats.possession) +
-      (stats.possession === "Not available" ? "" : "%") + "</b></div><div><span>Avg. Shots</span><b>" +
-      escapeHtml(stats.shots) + "</b></div><div><span>Avg. Shots on Target</span><b>" +
-      escapeHtml(stats.target) + "</b></div></div></section>" +
+      (stats.assists !== "Not available" ? '<div><span>Assists</span><b>' + escapeHtml(stats.assists) + "</b><small>" + escapeHtml(stats.assistsNote) + "</small></div>" : "") +
+      (stats.availableMetrics.possession ? '<div><span>Avg. Possession</span><b>' + escapeHtml(stats.possession) + "%</b><small>" + stats.sampleCounts.possession + (stats.sampleCounts.possession === 1 ? " match" : " matches") + "</small></div>" : "") +
+      (stats.availableMetrics.shots ? '<div><span>Avg. Shots</span><b>' + escapeHtml(stats.shots) + "</b><small>" + stats.sampleCounts.shots + (stats.sampleCounts.shots === 1 ? " match" : " matches") + "</small></div>" : "") +
+      (stats.availableMetrics.target ? '<div><span>Avg. Shots on Target</span><b>' + escapeHtml(stats.target) + "</b><small>" + stats.sampleCounts.target + (stats.sampleCounts.target === 1 ? " match" : " matches") + "</small></div>" : "") +
+      "</div></section>" +
       '<section class="panel chart-panel"><div class="chart-panel-head"><div><h2>Team Performance</h2><p>Actual saved match values · missing values are gaps</p></div><div class="chart-tabs">' +
       chartTabs(stats) + '</div></div>' +
-      (stats.availableMetrics[state.chartMetric] || state.chartMetric === "goals" || state.chartMetric === "points"
+      (stats.availableMetrics[state.chartMetric]
         ? '<div class="chart-canvas-wrap"><canvas id="team-chart" role="img" aria-label="Chart of saved match statistics for ' +
           escapeHtml(state.team) + '"></canvas></div>'
         : '<p class="metric-unavailable">No genuine saved values are available for this metric.</p>') +
@@ -464,8 +488,8 @@
   }
 
   function leagueRows() {
-    if (state.standings.length) {
-      return state.standings.map(function (team) {
+    if (officialStandings().length) {
+      return officialStandings().map(function (team) {
         return "<tr><td><span class=\"rank-pill\">" + team.position + "</span></td><td><span class=\"team-name-cell\">" +
           badge(team.team_name) + "<b>" + escapeHtml(team.team_name) + "</b></span></td><td>" + team.played + "</td><td>" +
           team.wins + "</td><td>" + team.draws + "</td><td>" + team.losses + "</td><td>" +
@@ -474,14 +498,14 @@
     }
     const standings = teamNames().map(function (name) {
       const record = teamRecord(name);
-      return { name: name, played: record.played, wins: record.wins, draws: record.draws, losses: record.losses, goals: record.goals, points: record.points };
+      return { name: name, played: record.played, wins: record.wins, draws: record.draws, losses: record.losses, goals: record.goals, difference: record.goals - record.goalsAgainst, points: record.points };
     }).sort(function (left, right) {
-      return right.points - left.points || right.goals - left.goals || left.name.localeCompare(right.name);
+      return right.points - left.points || right.difference - left.difference || right.goals - left.goals || left.name.localeCompare(right.name);
     });
     return standings.map(function (team, index) {
       return "<tr><td><span class=\"rank-pill\">" + (index + 1) + "</span></td><td><span class=\"team-name-cell\">" +
         badge(team.name) + "<b>" + escapeHtml(team.name) + "</b></span></td><td>" + team.played + "</td><td>" +
-        team.wins + "</td><td>" + team.draws + "</td><td>" + team.losses + "</td><td>" + team.goals + "</td><td>" +
+        team.wins + "</td><td>" + team.draws + "</td><td>" + team.losses + "</td><td>" + team.difference + "</td><td>" +
         team.points + "</td></tr>";
     }).join("");
   }
@@ -489,11 +513,11 @@
   function statisticsScreen() {
     const rows = leagueRows();
     if (!rows) return emptyState("League comparison is unavailable until live match records are imported.");
-    const official = state.standings.length > 0;
+    const official = officialStandings().length > 0;
     return '<div class="welcome-row"><div><p class="section-kicker">' + (official ? "OFFICIAL PROVIDER TABLE" : "IMPORTED MATCH COMPARISON") + '</p><p class="muted">' +
       (official ? "Official football-data.org Serie A standings." : "Partial table from locally saved finished results; not official.") + '</p></div>' +
       '<span class="result-count">' + (official ? "FOOTBALL-DATA.ORG" : "LOCAL RECORDS") + '</span></div><section class="panel table-panel"><div class="panel-heading"><div><h2>' +
-      (official ? "Serie A Standings" : "Team Comparison") + '</h2><p>' + (official ? "Played, results, goal difference and points" : "Ranked by points, then goals") + '</p></div></div>' +
+      (official ? "Serie A Standings" : "Team Comparison") + '</h2><p>' + (official ? "Played, results, goal difference and points" : "Ranked by points, goal difference, then goals") + '</p></div></div>' +
       '<div class="table-wrap"><table><thead><tr><th>#</th><th>Team</th><th>Played</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Points</th></tr></thead><tbody>' +
       rows + "</tbody></table></div></section>";
   }
@@ -510,19 +534,19 @@
     });
     return (state.actionMessage ? '<p class="live-status" role="status">' + escapeHtml(state.actionMessage) + "</p>" : "") +
       '<div class="saved-layout"><section class="panel table-panel saved-table-panel"><div class="panel-heading"><div><h2>Your Collection</h2><p>' +
-      items.length + " saved live matches · Season " + escapeHtml(state.season) + '</p></div><span class="result-count">' + items.length + " SAVED</span></div>" +
+      items.length + " saved live matches · Season " + escapeHtml(activeSeason() || "unavailable") + '</p></div><span class="result-count">' + items.length + " SAVED</span></div>" +
       '<div class="table-wrap"><table><thead><tr><th>Date / Status</th><th>Home Team</th><th>Score</th><th>Away Team</th><th>Actions</th></tr></thead><tbody>' +
       (rows || '<tr><td class="empty-state" colspan="5">No saved live matches. Save a fixture from Matches.</td></tr>') + "</tbody></table></div></section>" +
-      '<section class="panel quick-analysis"><div class="panel-heading"><div><h2>Quick Analysis</h2><p>Saved match outcomes with known scores</p></div>' +
+      (outcomes.some(Boolean) ? '<section class="panel quick-analysis"><div class="panel-heading"><div><h2>Quick Analysis</h2><p>Saved match outcomes with known scores</p></div>' +
       icon("chart-pie", 17) + '</div><div class="donut-wrap"><canvas id="saved-chart" role="img" aria-label="Donut chart of saved live match outcomes"></canvas>' +
       '<div class="donut-center"><strong>' + items.length + '</strong><span>Saved</span></div></div><div class="legend-list">' +
       '<span><i class="legend-dot home-dot"></i> Home wins <b id="home-count">0</b></span><span><i class="legend-dot draw-dot"></i> Draws <b id="draw-count">0</b></span>' +
-      '<span><i class="legend-dot away-dot"></i> Away wins <b id="away-count">0</b></span></div></section></div>';
+      '<span><i class="legend-dot away-dot"></i> Away wins <b id="away-count">0</b></span></div></section>' : '') + '</div>';
   }
 
   function aboutScreen() {
     return '<div class="about-hero panel"><div class="about-logo"><img src="assets/logo.svg" alt=""></div><div><p class="section-kicker">LOCAL LIVE-DATA APPLICATION</p>' +
-      '<h2>Real records, carefully labeled.</h2><p>Match fixtures and available post-match statistics are imported from BigBallsData after explicit confirmation and stored locally in SQLite. Missing values are never replaced with sample values.</p>' +
+      '<h2>Real records, carefully labeled.</h2><p>Official fixtures and standings come from football-data.org. Available match details come from Highlightly and preserved BigBallsData records, and are stored locally after approval. Missing values are never replaced with sample values.</p>' +
       '<span class="demo-tag">LIVE DATA · LOCAL DATABASE</span></div></div><div class="about-grid">' +
       '<article class="panel about-card"><span class="about-icon">' + icon("database", 19) + '</span><h3>Provider data</h3><p>Current-season fixtures and available match statistics only. API availability depends on the configured provider plan.</p></article>' +
       '<article class="panel about-card"><span class="about-icon">' + icon("shield-check", 19) + '</span><h3>Honest gaps</h3><p>Possession, shots, player contributions, and lineups remain unavailable unless a provider supplied and saved them.</p></article>' +
@@ -553,6 +577,7 @@
     });
     function indicators(player) {
       let html = "";
+      if (player.rating != null) html += '<span class="lineup-indicator rating-indicator" title="Player rating">' + escapeHtml(player.rating) + "</span>";
       if (player.goals != null && player.goals > 0) html += '<span class="lineup-indicator goal-indicator" title="' + player.goals + ' goal(s)">G' + player.goals + "</span>";
       if (player.assists != null && player.assists > 0) html += '<span class="lineup-indicator assist-indicator" title="' + player.assists + ' assist(s)">A' + player.assists + "</span>";
       if (player.yellow_cards != null && player.yellow_cards > 0) html += '<span class="lineup-indicator card-indicator yellow-card" title="' + player.yellow_cards + ' yellow card(s)"></span>';
@@ -568,12 +593,13 @@
     function renderSide(teamName, side) {
       const lineup = byName.find(function (entry) { return entry.team_name === teamName; });
       if (!lineup) return '<div class="panel empty-state">Lineup not provided for ' + escapeHtml(teamName) + ".</div>";
-      const formation = formations.formations[lineup.formation] ? lineup.formation : "4-3-3";
-      const positions = formations.getFormationPositions(formation, side);
+      const positions = formations.getPitchPositions(lineup.formation);
+      const hasFormation = positions.length === 11;
       const players = (lineup.starting_players || []).map(function (player, index) {
         const slot = Number(player.formation_slot);
         const positionIndex = Number.isInteger(slot) && slot >= 1 && slot <= 11 ? slot - 1 : index;
-        const point = positions[positionIndex] || { left: 50, top: 50, role: "Player" };
+        const point = positions[positionIndex];
+        if (!hasFormation) return selectPlayer(player, "substitute-player") + escapeHtml(player.name) + indicators(player) + "</button>";
         return selectPlayer(player, "pitch-player " + side, 'style="left:' + point.left + "%;top:" + point.top + '%"') +
           '<span class="pitch-shirt">' +
           escapeHtml(player.shirt_number == null ? "—" : player.shirt_number) + '</span><span class="pitch-name">' +
@@ -581,7 +607,7 @@
           "</span>" + indicators(player) + "</button>";
       }).join("");
       return '<section class="panel detail-panel"><div class="panel-heading"><div><h2>' + escapeHtml(teamName) +
-        '</h2><p>' + escapeHtml(lineup.formation || "Formation not provided") + '</p></div></div><div class="football-pitch">' +
+        '</h2><p>' + escapeHtml(lineup.formation || "Formation not supplied") + '</p></div></div>' + (hasFormation ? '<div class="football-pitch"><span class="pitch-halfway"></span><span class="pitch-center-circle"></span>' : '<p class="muted">Pitch positions are unavailable because no supported formation was supplied.</p><div class="substitute-list">') +
         players + "</div></section>";
     }
     function substituteList(teamName, role, heading) {
@@ -593,7 +619,7 @@
           return selectPlayer(player, "substitute-player") +
             '<span class="substitute-number">' + escapeHtml(player.shirt_number == null ? "—" : player.shirt_number) +
             '</span><span>' + escapeHtml(player.name) + '<br><small>' +
-            (role === "substitutes_used" ? "Used · " + (player.minute_on == null ? "minute unavailable" : player.minute_on + "'") : "Unused") +
+            (role === "substitutes_used" ? "Used · " + (player.minute_on == null ? "minute unavailable" : player.minute_on + "'") : (player.minutes_played === 0 ? "Unused" : "Usage not supplied")) +
             "</small></span>" + indicators(player) + "</button>";
         }).join("") + "</div>" : '<p class="muted">Not available.</p>') + "</section>";
     }
@@ -604,6 +630,7 @@
       escapeHtml(selected.player.shirt_number == null ? "Not available" : selected.player.shirt_number) +
       '</p><div class="player-stat-list">' +
       [["Rating", selected.player.rating], ["Minutes played", selected.player.minutes_played],
+        ["Substitution on (minute)", selected.player.minute_on], ["Substitution off (minute)", selected.player.minute_off],
         ["Goals", selected.player.goals], ["Assists", selected.player.assists],
         ["Shots", selected.player.shots_total], ["Shots on target", selected.player.shots_on_target],
         ["Shots off target", selected.player.shots_off_target],
@@ -616,18 +643,19 @@
         ["Fouls committed", selected.player.fouls_committed], ["Fouls drawn", selected.player.fouls_drawn],
         ["Saves", selected.player.goalkeeper_saves],
         ["Yellow cards", selected.player.yellow_cards], ["Red cards", selected.player.red_cards]]
+        .filter(function (entry) { return entry[1] != null; })
         .map(function (entry) {
           return "<span>" + entry[0] + "<b>" + escapeHtml(entry[1] == null ? "Not available" : entry[1]) + "</b></span>";
         }).join("") + "</div></section>" :
       '<section class="panel player-detail player-detail-empty">Select a player on the pitch or from the substitutes to see saved provider statistics.</section>';
     return '<div class="lineup-open-row"><button class="button button-secondary" data-action="back-detail">Back to match</button></div>' +
-      '<p class="lineup-footnote">Player events and cards are shown only when present in stored lineup records.</p>' +
+      '<p class="lineup-footnote">Pitch locations are schematic and follow the supplied formation slots. Select a player for saved performance fields.</p>' +
       '<div class="lineups-grid">' + renderSide(item.home_team.name, "home") + renderSide(item.away_team.name, "away") +
       playerDetail + "</div><section class=\"panel substitutes-panel\"><div class=\"substitute-groups\">" +
       substituteList(item.home_team.name, "substitutes_used", "Used substitutes") +
       substituteList(item.away_team.name, "substitutes_used", "Used substitutes") +
-      substituteList(item.home_team.name, "unused_substitutes", "Unused substitutes") +
-      substituteList(item.away_team.name, "unused_substitutes", "Unused substitutes") +
+      substituteList(item.home_team.name, "unused_substitutes", "Other substitutes") +
+      substituteList(item.away_team.name, "unused_substitutes", "Other substitutes") +
       "</div></section>";
   }
 
@@ -643,6 +671,7 @@
   }
 
   function render() {
+    app.setAttribute("aria-busy", String(state.busy));
     if (state.chart) { state.chart.destroy(); state.chart = null; }
     if (state.screen === "landing") {
       app.innerHTML = '<main class="landing"><div class="landing-scrim"></div><header class="landing-top"><a href="#" class="landing-brand" data-action="navigate" data-screen="dashboard"><img src="assets/logo.svg" alt=""><span>TRACKER<br><b>SERIE A</b></span></a><span class="landing-demo">LIVE DATA · LOCAL DATABASE</span></header>' +
@@ -740,11 +769,13 @@
       const results = await Promise.all([
         request("/api/matches?source=live"),
         request("/api/saved-matches"),
-        request("/api/standings?season=2026")
+        request("/api/standings"),
+        request("/api/data-coverage")
       ]);
       state.matches = results[0];
       state.savedMatches = results[1];
       state.standings = results[2];
+      state.coverage = results[3];
       state.loading = false;
       state.error = "";
       render();
@@ -790,77 +821,9 @@
     return request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   }
 
-  async function importMatches(refresh) {
-    const input = document.getElementById("import-season");
-    const year = Number(input && input.value);
-    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-      state.actionMessage = "Enter a valid season start year.";
-      render();
-      return;
-    }
-
-    async function syncFootballData() {
-      const input = document.getElementById("import-season");
-      const year = Number(input && input.value);
-      if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-        state.actionMessage = "Enter a valid season start year.";
-        render();
-        return;
-      }
-      if (!window.confirm("Authorize exactly two football-data.org requests for fixtures and official standings? No automatic retry will be made.")) return;
-      state.actionMessage = "Synchronizing fixtures and official standings…";
-      render();
-      try {
-        const result = await post("/api/football-data/sync", { season: year, confirmed: true });
-        state.actionMessage = "Stored " + (result.imported_records.created + result.imported_records.updated) +
-          " football-data.org fixtures and " + result.standings_rows + " standings rows.";
-        await refreshLocal();
-      } catch (error) {
-        state.actionMessage = error.message || "football-data.org synchronization failed.";
-        render();
-      }
-    }
-    const verb = refresh ? "Refresh" : "Import";
-    if (!window.confirm(verb + " with up to five authenticated BigBallsData page requests for all available " + year + " Serie A fixtures? No automatic retry will be made.")) return;
-    state.actionMessage = "Requesting the confirmed fixture list…";
-    render();
-    try {
-      const result = await post("/api/bbs/matches/import", {
-        season: year, limit: 200, max_pages: 5, confirmed: true, refresh: Boolean(refresh)
-      });
-      state.actionMessage = "Saved fixtures: " + result.imported_records.created + " new, " +
-        result.imported_records.updated + " updated. Requests used: " + result.requests_used + ".";
-      await refreshLocal();
-    } catch (error) {
-      state.actionMessage = error.message || "Fixture import failed. No retry was attempted.";
-      render();
-    }
-  }
-
-  async function importStatistics(refresh) {
-    const item = state.matchDetails;
-    if (!item) return;
-    const requestCount = item.bbs_match_id || item.statistics_provider_match_id ? 1 : 2;
-    if (!window.confirm((refresh ? "Refresh" : "Import") + " this match's post-match statistics using " +
-      requestCount + " authenticated BigBallsData request(s)? No automatic retry will be made.")) return;
-    state.actionMessage = "Requesting confirmed match statistics…";
-    render();
-    try {
-      const details = await post("/api/matches/" + item.id + "/statistics/import", {
-        confirmed: true, refresh: Boolean(refresh)
-      });
-      state.matchDetails = details;
-      const info = details.statistics_import || {};
-      state.actionMessage = info.cached ? "Using saved statistics; no provider request was made." :
-        "Statistics updated from BigBallsData.";
-      await refreshLocal();
-      state.screen = "match";
-      state.matchDetails = details;
-      render();
-    } catch (error) {
-      state.actionMessage = error.message || "Statistics import failed. No retry was attempted.";
-      render();
-    }
+  async function importStatistics(_refresh, _approved) {
+    if (!state.matchDetails) return;
+    await prepareSync({ match_ids: [state.matchDetails.id], categories: ["statistics"], max_matches: 1, max_requests: 2 });
   }
 
   async function toggleSaved(id, remove) {
@@ -880,42 +843,97 @@
 
   async function importLineups() {
     if (!state.matchDetails) return;
-    if (!window.confirm("Make up to two authenticated StrikerAPI requests: one completed-match lookup and one lineup request (up to 7 credits). No retry will be made.")) return;
-    try {
-      state.lineups = await post("/api/matches/" + state.matchDetails.id + "/lineups/import", { confirmed: true });
-      state.actionMessage = state.lineups.message || "Lineups saved.";
-      render();
-    } catch (error) {
-      state.actionMessage = error.message || "Lineup import failed. No retry was attempted.";
-      render();
-    }
+    await prepareSync({ match_ids: [state.matchDetails.id], categories: ["lineups"], max_matches: 1, max_requests: 2 });
+  }
 
-    async function importPlayerDetails() {
-      if (!state.matchDetails) return;
-      if (!window.confirm("Authorize one Highlightly box-score request and one events request for this match? No retry will be made.")) return;
-      state.actionMessage = "Fetching confirmed player details and events…";
-      render();
-      try {
-        const result = await post("/api/matches/" + state.matchDetails.id + "/highlightly-details/import", { confirmed: true });
-        state.matchDetails = result.details;
-        state.actionMessage = "Saved " + result.player_records_updated + " player records and " + result.events_imported + " events.";
-        state.lineups = await request("/api/matches/" + state.matchDetails.id + "/lineups");
-        render();
-      } catch (error) {
-        state.actionMessage = error.message || "Player details import failed. No retry was attempted.";
-        render();
+  async function importPlayerDetails() {
+    if (!state.matchDetails) return;
+    await prepareSync({ match_ids: [state.matchDetails.id], categories: ["box-score", "events"], max_matches: 1, max_requests: 2 });
+  }
+
+  async function prepareSync(options) {
+    if (state.busy) return;
+    const season = state.matchDetails && options.match_ids ? state.matchDetails.season : activeSeason();
+    if (!season) { state.actionMessage = "Import official fixtures before requesting match details."; render(); return; }
+    state.busy = true;
+    state.actionMessage = "Checking saved coverage and quota metadata...";
+    state.pendingApproval = null;
+    render();
+    try {
+      const body = Object.assign({ season: Number(season) }, options);
+      const plan = await post("/api/highlightly/plan", body);
+      const budget = Math.min(options.max_requests, plan.recommended_budget);
+      const names = plan.matches.map(function (match) { return match.home + " vs " + match.away; }).join("; ");
+      const blocked = plan.matches.some(function (match) { return match.blocked_categories.length; });
+      if (!plan.matches.length || (!budget && !plan.matches.some(function (m) { return m.cached_categories.length; }))) {
+        state.actionMessage = plan.quota.remaining === 0 ? "The last saved quota is exhausted. No request was sent." :
+          "No new requests are ready. Saved data is reused; unavailable categories are skipped.";
+      } else if (blocked) {
+        state.actionMessage = "An earlier request failed or was interrupted. Its saved status needs review before another request for that category.";
+      } else {
+        state.pendingApproval = { type: "highlightly-sync", body: Object.assign({}, body, {
+          match_ids: plan.matches.map(function (match) { return match.match_id; }), max_requests: budget
+        }), message: "Authorize up to " + budget + " Highlightly requests for " + names +
+          "? Categories: " + body.categories.join(", ") + ". " +
+          (plan.quota.remaining == null ? "Current RapidAPI quota is unknown; check the dashboard before approving." :
+            "Last observed quota: " + plan.quota.remaining + " requests (" + formatTimestamp(plan.quota.observed_at) + ").") +
+          " Saved and unavailable categories are skipped. This approval covers one batch only." };
+        state.actionMessage = "Review the batch below. No authenticated request has been sent.";
       }
+    } catch (error) { state.actionMessage = error.message; }
+    finally { state.busy = false; render(); }
+  }
+
+  async function syncHighlightly(approved) {
+    if (!approved) {
+      const matches = document.getElementById("highlightly-max-matches");
+      const requests = document.getElementById("highlightly-max-requests");
+      const events = document.getElementById("highlightly-include-events");
+      const categories = ["statistics", "lineups", "box-score"];
+      if (events && events.checked) categories.push("events");
+      await prepareSync({ max_matches: Math.min(10, Math.max(1, Number(matches && matches.value) || 1)),
+        max_requests: Math.min(40, Math.max(1, Number(requests && requests.value) || 5)), categories: categories });
+      return;
     }
+    if (!state.pendingApproval || state.busy) return;
+    const body = Object.assign({}, state.pendingApproval.body, { confirmed: true });
+    const selectedMatch = state.matchDetails && state.matchDetails.id;
+    state.pendingApproval = null;
+    state.busy = true;
+    state.actionMessage = "Saving the approved batch. Please keep this window open...";
+    render();
+    try {
+      const result = await post("/api/highlightly/sync", body);
+      state.actionMessage = "Saved batch: " + result.processed_matches + " matches, " + result.requests_used + " requests." +
+        (result.stopped_reason ? " " + result.stopped_reason : "");
+      if (selectedMatch) {
+        state.matchDetails = await request("/api/matches/" + selectedMatch);
+        state.lineups = await request("/api/matches/" + selectedMatch + "/lineups");
+      }
+      await refreshLocal();
+    } catch (error) { state.actionMessage = error.message; }
+    finally { state.busy = false; render(); }
   }
 
   app.addEventListener("click", function (event) {
     const target = event.target.closest("[data-action]");
-    if (!target) return;
+    if (!target || state.busy) return;
     const action = target.dataset.action;
-    if (action === "navigate") {
+    if (action === "approve-request") {
+      const approval = state.pendingApproval;
+      if (!approval) return;
+      if (approval.type === "statistics") importStatistics(false, true);
+      else if (approval.type === "lineups") importLineups(true);
+      else if (approval.type === "player-details") importPlayerDetails(true);
+      else if (approval.type === "highlightly-sync") syncHighlightly(true);
+    } else if (action === "cancel-request") {
+      state.pendingApproval = null;
+      render();
+    } else if (action === "navigate") {
       event.preventDefault();
       state.screen = target.dataset.screen;
       state.actionMessage = "";
+      state.pendingApproval = null;
       if (target.dataset.screen !== "matches") {
         state.search = "";
         state.round = "all";
@@ -925,12 +943,6 @@
       document.querySelector(".sidebar").classList.toggle("sidebar-open");
     } else if (action === "refresh-local") {
       refreshLocal();
-    } else if (action === "import-matches") {
-      importMatches(false);
-    } else if (action === "refresh-matches") {
-      importMatches(true);
-    } else if (action === "sync-football-data") {
-      syncFootballData();
     } else if (action === "view-match") {
       loadMatch(target.dataset.id);
     } else if (action === "save-match" || action === "remove-save") {
@@ -942,9 +954,11 @@
     } else if (action === "load-lineups") {
       loadLineups();
     } else if (action === "import-lineups") {
-      importLineups();
+      importLineups(false);
     } else if (action === "import-player-details") {
-      importPlayerDetails();
+      importPlayerDetails(false);
+    } else if (action === "sync-highlightly") {
+      syncHighlightly(false);
     } else if (action === "open-pitch") {
       state.screen = "lineup";
       if (!state.lineups) loadLineups();
@@ -954,9 +968,10 @@
       render();
     } else if (action === "select-player") {
       state.selectedPlayerId = target.dataset.playerId;
+      state.screen = "lineup";
       render();
     } else if (action === "import-statistics" || action === "refresh-statistics") {
-      importStatistics(action === "refresh-statistics");
+      importStatistics(action === "refresh-statistics", false);
     } else if (action === "chart-tab") {
       state.chartMetric = target.dataset.metric;
       render();

@@ -1,119 +1,116 @@
 # Serie A Match Statistics Tracker
 
-This is a local Python/FastAPI application with a responsive browser interface. It displays provider records saved in SQLite. The production UI does not load fictional fixtures or generated statistics.
+A local FastAPI and SQLite application for official Serie A fixtures, standings,
+available match statistics, player lineups, player performance and events.
+The existing dark-navy interface reads saved records without consuming API quota.
 
-## Run on Windows
+## Current supplied data
 
-1. Install Python 3.10 or later.
-2. Open PowerShell in this project folder.
-3. Create and activate a virtual environment:
+The supplied 2026?27 database contains **380 official fixtures**, **110 unique
+completed results**, and **20 standings rows**. Coverage is **2/110** for match
+statistics, **1/110** for lineups, **1/110** for player performance and **0/110** for
+events. Five Highlightly fixture IDs are saved. Some older provider records are
+retained in SQLite, but official league lists and totals exclude them.
 
-   ```powershell
-   py -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
+The application supports all 20 teams. Advanced averages use only supplied values
+and show sample sizes. Missing fields remain absent; missing values are not zeros.
+Data availability beyond the supplied records depends on the providers and plan.
+This is a working local application with partial data, not a completed league-wide
+statistics dataset. See `docs/DELIVERY_STATUS.md` for acceptance and limitations.
 
-4. Install dependencies and start the app:
+## Setup on Windows
 
-   ```powershell
-   python -m pip install -r requirements.txt
-   python main.py
-   ```
-
-5. Open <http://127.0.0.1:8000>. Stop the server with **Ctrl+C**.
-
-The same commands work in the PyCharm terminal after selecting the `.venv` interpreter. Do not open `index.html` using `file://`; the pages read the local FastAPI endpoints.
-
-## Configure football-data.org and BigBallsData
-
-The official competition fixture and standings source is football-data.org.
-Set its token locally when you have access:
-
-```text
-FOOTBALL_DATA_TOKEN=your_token_here
-```
-
-The Statistics page uses the saved football-data.org table when synchronized.
-The Sync fixtures + standings action makes exactly two bounded requests for the
-selected season and does not retry. The response's `resultSet.count` is returned
-alongside the actual records returned for coverage checking; the application
-does not assume a complete season.
-
-BigBallsData remains the detail-statistics source:
-
-Copy `.env.example` to `.env` and set your own key locally:
-
-```text
-BBS_API_KEY=your_key_here
-```
-
-`.env` is Git-ignored. The application never prints or returns the key. `BIGBALLSDATA_API_KEY` is accepted only as a backward-compatible fallback. StrikerAPI credentials, when used for lineups, also remain in the local environment.
-
-No provider request is made at application startup or by opening a page. On Dashboard or Matches, choose **Sync current season** or **Refresh latest fixtures** and confirm the prompt to make up to five bounded, paginated authenticated BigBallsData requests. **Refresh saved records** only reloads SQLite. Statistics are imported separately from Match Details after another confirmation. A BBS-linked match uses one statistics request; an older live fixture without its BBS UUID requires an exact date-and-team lookup followed by the statistics request. Requests are bounded, failures are shown, and there are no automatic retries.
-
-The Free-plan documentation describes current-season factual match statistics, but access is subject to the provider account's limits. The app does not promise that every match has every statistic. When a provider omits a field, it stays null and the UI shows **Not available**.
-
-## Verified provider response
-
-Two separately authorized authenticated requests succeeded during integration: one current-season finished-fixture list request and one statistics request for Fiorentina–Juventus (provider match UUID `5a5e7d30-3b82-4965-bede-8cead82536e6`, 8 November 2026, 2–2). The returned match-statistics response contained:
-
-| Team       | Possession | Total shots | Shots on target |
-| ---------- | ---------: | ----------: | --------------: |
-| Fiorentina |        41% |          22 |               6 |
-| Juventus   |        59% |          18 |               6 |
-
-These are values from that real response, not estimates. The provider did not include `team_stats_available` or `withheld` metadata in the statistics response. Availability beyond the populated fields is not assumed. No further authenticated calls are needed for tests.
-
-The verified fixture and statistics have been saved once in the local SQLite database. The retained verification details included the match date but not a kickoff time, so it is stored and shown as date-only rather than assigning a made-up time. Opening or refreshing the application reads this saved record and makes no provider request.
-
-## Screens and interactions
-
-- **Dashboard:** totals derived from saved match rows and a recent-match table.
-- **Matches:** filter by season and any provider-supplied round, search both team names, open details, save, and remove.
-- **Match Details:** actual score, saved statistics, available player contributions, and lineup data. Last-updated times come from saved provider timestamps. Statistics refresh and lineup import require explicit confirmation.
-- **Team Statistics:** calculate wins/draws/losses and goals from saved scores; possession, shots, and shots on target are averaged only where present. Assists are totaled only for matches with complete saved player-assist data. Chart tabs plot actual match values, with gaps for missing data.
-- **Statistics:** a comparison of imported finished results, not a claim of full official standings. The current BBS standings response returned no usable rows, so official standings remain unavailable rather than being inferred from local results.
-- **Saved Matches:** selections persist in SQLite and the chart uses only saved matches with known scores.
-- **About:** explains provider limitations and data provenance.
-
-The Lineups tab and football pitch show locally stored permitted provider lineups when available. The current synchronized BBS fixture set has no stored lineup rows, so the interface reports lineups as unavailable until a safely matched StrikerAPI lineup is explicitly imported. The app does not fabricate formations, player events, or player statistics. A BBS fixture UUID is stored separately from any StrikerAPI integer match ID; the application does not treat the two providers' IDs as interchangeable.
-
-## Provider-neutral detail contract
-
-The provider-neutral converter in `app/provider_detail_converter.py` is a
-local transformation only. It does not fetch or save data. A permitted live
-provider must supply a stable match ID, oriented home and away teams, match
-date, status, and final scores. For detailed statistics it must identify
-possession, total shots, and shots on target for each side. For the lineup
-screen it must identify each team's formation, starting players, substitutes,
-player IDs or names, positions, shirt numbers when available, and player
-events such as goals, assists, cards, and substitutions. Missing fields remain
-`None`; zero is preserved as zero. Provider IDs must remain separate until an
-exact, unambiguous fixture match is proven.
-
-## SQLite and migrations
-
-The local database file is `serie_a.db`. Startup creates missing tables and adds BBS team/match UUIDs, provider rounds, fetch timestamps, and the saved-match table using additive SQLite migrations. Existing match, lineup, and statistics rows are preserved. `Match.api_match_id` remains the StrikerAPI ID, while `Match.bbs_match_id` stores the BBS UUID. Saved matches reference local match rows and removing a saved selection does not delete the fixture.
-
-Fixture imports reuse an existing exact local match when its season, UTC date, and home/away team names identify one unique row. Conflicting scores or ambiguous matches are rejected. Statistics are matched by the stored BBS UUID whenever possible. Older records use the stricter date, season, oriented-team, and score checks before any statistics are attached.
-
-The current-season Sync action requests up to five BBS pages, with up to 200
-fixtures per page, stops at the provider's short page or a repeated page, and
-deduplicates provider fixture IDs before saving. Scheduled, live, and finished
-fixtures are retained; detailed statistics and lineups remain on-demand.
-
-## Tests
-
-Run the Python tests with:
+Python 3.11 or newer is recommended; final acceptance records the tested version.
+Open a terminal in the extracted project folder:
 
 ```powershell
-python -m pytest -v
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe main.py
 ```
 
-The automated provider tests use mocked responses. They do not send authenticated requests. The formation helper also has a Node.js test; run it with:
+Open **http://127.0.0.1:8000**. Stop the server with Ctrl+C. Running `python main.py`
+with the selected environment starts the same application. If the port is in use,
+change `SERIE_A_PORT` in `.env` and open that port instead. Do not open `index.html`
+directly with a file URL. Keep one application process per database during imports.
+
+No API credentials are needed to browse the supplied data. Chart.js and Lucide are
+bundled locally with their licenses. Optional web fonts use Google Fonts; the UI
+falls back to system fonts if offline.
+
+### PyCharm
+
+Open this folder as a project. In Settings > Project > Python Interpreter choose
+`.venv\Scripts\python.exe`. Create a Python run configuration with script
+`main.py` and the project folder as the working directory, then Run.
+
+### VS Code
+
+Open this folder, install the Python extension, choose **Python: Select
+Interpreter**, and select `.venv\Scripts\python.exe`. Run `python main.py` from
+the integrated terminal or use **Run Python File** on `main.py`.
+
+## Provider setup and approval
+
+Copy `.env.example` to `.env` and configure only the providers you intend to use:
+
+- `FOOTBALL_DATA_TOKEN`: official fixture and standings synchronization.
+- `X_API_KEY`: Highlightly through RapidAPI, used for match details.
+- `BBS_API_KEY`: optional legacy BigBallsData integration.
+- `STRIKER_API_KEY`: optional compatibility integration; not used by the website's
+  current detail controls.
+
+Do not put credentials in HTML, JavaScript, screenshots or delivery archives.
+The running app's API documentation is at `/docs`.
+
+On Home choose **Review missing data**, inspect the proposed matches, categories,
+request maximum and last saved quota observation, then explicitly approve one
+batch. Events are optional. Match details also have category-specific review
+buttons. Every batch requires a new approval. A successful category is saved
+independently, and restarts reuse persisted results. API errors stop the batch.
+Unavailable categories are retained as unavailable rather than repeatedly fetched.
+See `docs/SYNC_WORKFLOW.md` for recovery and endpoint details.
+
+The first pending four-match batch needs at most 11 authenticated requests and
+excludes events and fixture lookups. It has **not** been executed. The remaining
+RapidAPI quota is unknown locally. Live multi-match import verification and further
+league enrichment require explicit authorization and permitted provider access.
+
+## Website features
+
+- Home: genuine completed results, league totals and detail coverage.
+- Matches: newest completed results first, team search, rounds and optional future
+  fixture filters; every official fixture can open its saved details.
+- Match details: supplied possession and shots, final scores, player contributions,
+  chronological events, starting XIs and substitutes.
+- Team statistics: results, goals, points, advanced averages and charts with gaps
+  for missing values and visible sample sizes.
+- Player pitch: supplied formations, schematic formation slots, readable clickable
+  names, ratings and contribution/card indicators. Unknown formations use a player
+  list without inventing pitch positions. Select a starter or substitute for all
+  available saved performance metrics.
+- League Statistics: official saved football-data.org standings, with a clearly
+  labeled local comparison only when no official table is available.
+- Saved Matches: persistent selections and outcome summaries.
+
+## Verification and delivery
+
+Tests use isolated SQLite files and mocked providers; they do not need live keys:
 
 ```powershell
-node js\formation-layout.test.cjs
+python -m pytest -q
+node --test js/formation-layout.test.cjs
+python tools/acceptance_check.py
+python tools/build_delivery.py
 ```
 
-Chart.js and Lucide are loaded from CDNs, so those visual assets require internet access; the local application and SQLite database run on the computer.
+Node is needed only for the optional formation tests. The acceptance checker
+launches `python main.py` on a free local port and verifies the supplied snapshot
+and major screens in headless Chrome or Edge if installed. It makes no football
+provider calls. Results go to `docs/ACCEPTANCE.json`.
+
+The build command creates `delivery/SerieA_Tracker.zip` with an allowlisted source
+structure and a consistent SQLite backup. It excludes `.env`, virtual environments,
+Git history, IDE settings, caches, screenshots and runtime diagnostics. Keep a
+backup of `serie_a.db` before replacing the delivered snapshot with another file.

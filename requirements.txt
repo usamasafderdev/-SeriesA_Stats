@@ -1,6 +1,6 @@
-fastapi
-uvicorn
-httpx
-pytest
-sqlalchemy
-python-dotenv
+fastapi==0.136.1
+uvicorn==0.46.0
+httpx==0.28.1
+sqlalchemy==2.0.50
+python-dotenv==1.2.2
+pytest==9.0.3

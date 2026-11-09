@@ -361,4 +361,5 @@ def test_match_details_include_saved_goal_scorers_and_assists(api_client):
     assert details["goal_assists"] == [
         {"player_name": "Away assist provider", "team_name": "Juventus", "assists": 1}
     ]
-    assert details["contributions_source"] == "strikerapi_lineups"
+    # These rows have no saved provider provenance; do not invent a provider.
+    assert details["contributions_source"] == "saved_lineups"

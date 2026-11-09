@@ -50,6 +50,14 @@ __pycache__/
 
 # Local SQLite database
 serie_a.db
+runtime/highlightly/
+delivery/
+runtime/acceptance/
+.idea/
+.vscode/
+*.db-wal
+*.db-shm
+*.db-journal
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
@@ -83,6 +91,8 @@ web_modules/
 
 # dotenv environment variable files
 .env
+.env.*
+!.env.example
 .env.development.local
 .env.test.local
 .env.production.local

@@ -9,7 +9,7 @@
   };
 
   function getFormationPositions(formation, side) {
-    const layout = formations[formation] || formations["4-3-3"];
+    const layout = getFormationLayout(formation) || formations["4-3-3"];
     const positions = [];
     let playerIndex = 0;
 
@@ -32,8 +32,36 @@
     return positions;
   }
 
+  function getFormationLayout(formation) {
+    if (formations[formation]) return formations[formation];
+    if (!/^\d(?:-\d){1,4}$/.test(formation || "")) return null;
+    const lines = formation.split("-").map(Number);
+    if (lines.some(function (count) { return count < 1 || count > 5; }) ||
+        lines.reduce(function (sum, count) { return sum + count; }, 0) !== 10) return null;
+    const roles = ["GK"];
+    lines.forEach(function (count, index) {
+      for (let n = 0; n < count; n++) roles.push(index === 0 ? "Defender" : index === lines.length - 1 ? "Forward" : "Midfielder");
+    });
+    return { rows: [1].concat(lines), roles: roles };
+  }
+
+  function getPitchPositions(formation) {
+    const layout = getFormationLayout(formation);
+    if (!layout) return [];
+    const positions = [];
+    layout.rows.forEach(function (count, row) {
+      for (let index = 0; index < count; index++) {
+        positions.push({ left: count === 1 ? 50 : 12 + index * 76 / (count - 1),
+          top: 88 - row * 76 / (layout.rows.length - 1), role: layout.roles[positions.length] });
+      }
+    });
+    return positions;
+  }
+
   const formationTools = {
     formations: formations,
+    getFormationLayout: getFormationLayout,
+    getPitchPositions: getPitchPositions,
     getFormationPositions: getFormationPositions
   };
   root.SERIE_A_FORMATIONS = formationTools;

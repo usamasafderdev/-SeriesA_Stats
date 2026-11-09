@@ -65,6 +65,9 @@ def test_database_tables_are_created(database_session):
         "saved_matches",
         "league_standings",
         "match_events",
+        "match_detail_sync",
+        "highlightly_responses",
+        "highlightly_requests",
     }
 
 

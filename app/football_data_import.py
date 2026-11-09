@@ -1,6 +1,6 @@
 """Convert football-data.org fixtures and standings into the local schema."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import unicodedata
 from typing import Any
@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import LeagueStanding, Match, Team
+from app.team_names import same_team
 
 
 def _date(value: str) -> datetime:
@@ -20,14 +21,7 @@ def _name(value: str) -> str:
 
 
 def _same_team(left: str, right: str) -> bool:
-    left_name = _name(left)
-    right_name = _name(right)
-    if left_name == right_name:
-        return True
-    for alias in ("acf", "fc", "calcio", "footballclub", "bc", "ss", "us", "as"):
-        left_name = left_name.removeprefix(alias).removesuffix(alias)
-        right_name = right_name.removeprefix(alias).removesuffix(alias)
-    return left_name == right_name
+    return same_team(left, right)
 
 
 def _team(session: Session, value: dict[str, Any]) -> Team:
@@ -85,6 +79,10 @@ def save_football_data_matches(
             .one_or_none()
         )
         kickoff = _date(item["utcDate"])
+        if match is not None and (match.season != str(season_start_year)
+                or not _same_team(match.home_team.name, home.name)
+                or not _same_team(match.away_team.name, away.name)):
+            raise ValueError("A football-data.org match ID conflicts with its saved fixture identity.")
         if match is None:
             candidates = (
                 session.query(Match)
@@ -127,6 +125,8 @@ def save_football_data_matches(
         else:
             counts["updated"] += 1
         match.football_data_match_id = str(item["id"])
+        match.match_date = kickoff
+        match.fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
         match.round_name = (
             f"Matchday {item['matchday']}" if item.get("matchday") else match.round_name
         )
@@ -143,7 +143,8 @@ def save_football_data_standings(
     tables = body.get("standings")
     if not isinstance(tables, list) or not tables:
         raise ValueError("football-data.org returned no standings table.")
-    rows = tables[0].get("table")
+    total = next((table for table in tables if table.get("type") == "TOTAL"), tables[0])
+    rows = total.get("table")
     if not isinstance(rows, list):
         raise ValueError("football-data.org standings table is malformed.")
     session.query(LeagueStanding).filter(

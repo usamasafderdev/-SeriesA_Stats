@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from typing import Generator
 
 from sqlalchemy import URL, create_engine, event, inspect, text
@@ -9,7 +10,7 @@ from app.models import Base
 
 
 PROJECT_FOLDER = Path(__file__).resolve().parent.parent
-DATABASE_PATH = PROJECT_FOLDER / "serie_a.db"
+DATABASE_PATH = Path(os.getenv("SERIE_A_DATABASE", str(PROJECT_FOLDER / "serie_a.db")))
 
 
 def create_database_engine(database_path: Path = DATABASE_PATH) -> Engine:
@@ -54,6 +55,21 @@ def initialize_database(database_engine: Engine = engine) -> None:
     Base.metadata.create_all(bind=database_engine)
     _add_match_statistics_source_columns(database_engine)
     _add_provider_identity_columns(database_engine)
+    _add_detail_provenance_columns(database_engine)
+
+
+def _add_detail_provenance_columns(database_engine: Engine) -> None:
+    additions = {
+        "match_events": {"added_minute": "INTEGER", "source": "VARCHAR(40)"},
+        "match_lineups": {"source": "VARCHAR(40)", "provider_match_id": "VARCHAR(100)",
+                          "fetched_at": "DATETIME"},
+    }
+    with database_engine.begin() as connection:
+        for table, fields in additions.items():
+            existing = {column["name"] for column in inspect(connection).get_columns(table)}
+            for name, kind in fields.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {kind}"))
 
 
 def _add_match_statistics_source_columns(database_engine: Engine) -> None:

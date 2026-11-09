@@ -1,0 +1,94 @@
+{
+  "checked_at_utc": "2026-11-09T11:17:40.107937+00:00",
+  "python": "3.14.3",
+  "authenticated_provider_requests": 0,
+  "launch": "python main.py",
+  "official_fixtures": 380,
+  "completed_match_details_checked": 110,
+  "teams_reconciled_with_standings": 20,
+  "coverage": {
+    "completed_fixtures": 110,
+    "detailed_statistics": 2,
+    "lineups": 1,
+    "player_performance": 1,
+    "events": 0,
+    "remaining_details": 108,
+    "requests_used": 0,
+    "request_count_note": "Recorded attempts since request-ledger installation; earlier usage is unknown.",
+    "quota": {
+      "remaining": null,
+      "observed_at": null,
+      "status": "unknown"
+    },
+    "remaining_matchdays": [
+      "Matchday 1",
+      "Matchday 2",
+      "Matchday 3",
+      "Matchday 4",
+      "Matchday 5",
+      "Matchday 6",
+      "Matchday 7",
+      "Matchday 8",
+      "Matchday 9",
+      "Matchday 10",
+      "Matchday 11"
+    ]
+  },
+  "browser_1440": {
+    "screens": [
+      "dashboard",
+      "matches",
+      "dashboard",
+      "matches",
+      "matches",
+      "matches",
+      "matches",
+      "teams",
+      "statistics",
+      "saved",
+      "about",
+      "dashboard"
+    ],
+    "browserErrors": [],
+    "inter": [
+      "43%\nPossession\n57%",
+      "4\nShots on Target\n1"
+    ],
+    "playerName": "David de Gea",
+    "playerFields": "Rating\n6.53\nMinutes played\n90\nGoals\n0\nAssists\n0\nShots\n0\nShots on target\n0\nYellow cards\n0\nRed cards\n0",
+    "viewport": {
+      "width": 1418,
+      "height": 1002
+    },
+    "success": true
+  },
+  "browser_390": {
+    "screens": [
+      "dashboard",
+      "matches",
+      "dashboard",
+      "matches",
+      "matches",
+      "matches",
+      "matches",
+      "teams",
+      "statistics",
+      "saved",
+      "about",
+      "dashboard"
+    ],
+    "browserErrors": [],
+    "inter": [
+      "43%\nPossession\n57%",
+      "4\nShots on Target\n1"
+    ],
+    "playerName": "David de Gea",
+    "playerFields": "Rating\n6.53\nMinutes played\n90\nGoals\n0\nAssists\n0\nShots\n0\nShots on target\n0\nYellow cards\n0\nRed cards\n0",
+    "viewport": {
+      "width": 390,
+      "height": 1000
+    },
+    "success": true
+  },
+  "status": "passed"
+}

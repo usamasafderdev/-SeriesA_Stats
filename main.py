@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import os
+from typing import Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -36,9 +38,17 @@ from app.football_api import (
     RateLimitError,
 )
 from app.lineup_import import convert_and_save_api_lineups
-from app.highlightly_api import HighlightlyClient, HighlightlyError, MissingHighlightlyKeyError
+from app.highlightly_api import (
+    HIGHLIGHTLY_SERIE_A_LEAGUE_ID,
+    HighlightlyClient,
+    HighlightlyError,
+    MissingHighlightlyKeyError,
+    local_quota,
+)
 from app.highlightly_import import (
+    _same_team_name,
     convert_highlightly_lineups,
+    has_player_performance,
     merge_highlightly_box_score,
     save_highlightly_lineups,
 )
@@ -143,6 +153,19 @@ class FootballDataSyncRequest(BaseModel):
     confirmed: bool = False
 
 
+class HighlightlySyncRequest(BaseModel):
+    season: int = Field(ge=2000, le=2100)
+    match_id: int | None = Field(default=None, gt=0)
+    match_ids: list[int] | None = Field(default=None, max_length=10)
+    allow_fixture_lookup: bool = True
+    categories: list[Literal["statistics", "lineups", "box-score", "events"]] = Field(
+        default_factory=lambda: ["statistics", "lineups", "box-score"], min_length=1, max_length=4)
+    retry_failed: bool = False
+    max_matches: int = Field(default=1, ge=1, le=10)
+    max_requests: int = Field(default=4, ge=0, le=40)
+    confirmed: bool = False
+
+
 @app.get("/api/health")
 def health_check():
     """Return a simple message that confirms the server is running."""
@@ -150,6 +173,203 @@ def health_check():
         "status": "ok",
         "application": "Serie A Tracker",
     }
+
+
+@app.get("/api/data-coverage")
+def data_coverage(session: Session = Depends(get_database_session)) -> dict:
+    """Return cached completion coverage without contacting any provider."""
+    completed = session.query(models.Match).filter(
+        models.Match.data_source == "live",
+        models.Match.football_data_match_id.is_not(None),
+        models.Match.status.ilike("finished"),
+    ).all()
+    from app.highlightly_sync import lineups_complete, statistics_present
+    detailed = sum(statistics_present(match) for match in completed)
+    lineups = sum(
+        lineups_complete(match)
+        for match in completed
+    )
+    player_performance = sum(
+        has_player_performance(match)
+        for match in completed
+    )
+    events = sum(bool(match.events) for match in completed)
+    remaining_matchdays = sorted({
+        match.round_name for match in completed
+        if match.round_name and (not statistics_present(match) or not lineups_complete(match)
+            or not has_player_performance(match) or not match.events)
+    }, key=lambda name: int(name.split()[-1]) if name.split()[-1].isdigit() else 0)
+    return {
+        "completed_fixtures": len(completed),
+        "detailed_statistics": detailed,
+        "lineups": lineups,
+        "player_performance": player_performance,
+        "events": events,
+        "remaining_details": max(0, len(completed) - detailed),
+        "requests_used": sum(row.attempts for row in session.query(models.HighlightlyRequest)),
+        "request_count_note": "Recorded attempts since request-ledger installation; earlier usage is unknown.",
+        "quota": local_quota(),
+        "remaining_matchdays": remaining_matchdays,
+    }
+
+
+def _provider_team_name(value: object) -> str:
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("teamName") or "")
+    return str(value or "")
+
+
+def _provider_score(value: object, side: str) -> int | None:
+    if not isinstance(value, dict):
+        return None
+    score = value.get(f"{side}Score")
+    if score is None:
+        team = value.get(f"{side}Team")
+        score = team.get("score") if isinstance(team, dict) else None
+    if score is None:
+        state = value.get("state")
+        current = state.get("score", {}).get("current") if isinstance(state, dict) and isinstance(state.get("score"), dict) else None
+        if isinstance(current, str):
+            import re
+            parts = re.fullmatch(r"\s*(\d+)\s*[-:]\s*(\d+)\s*", current)
+            if parts:
+                score = parts[1 if side == "home" else 2]
+    try:
+        return int(score) if score is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normal_name(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _same_provider_team(left: str, right: str) -> bool:
+    return _same_team_name(left, right)
+
+
+def _find_highlightly_fixture(
+    body: object,
+    match_record: models.Match,
+) -> str | None:
+    candidates = body.get("data", []) if isinstance(body, dict) else body
+    if not isinstance(candidates, list):
+        return None
+    matches = [
+        item for item in candidates
+        if isinstance(item, dict)
+        and _highlightly_fixture_metadata_matches(item, match_record)
+        and _same_provider_team(
+            _provider_team_name(item.get("homeTeam") or item.get("homeTeamName")),
+            match_record.home_team.name,
+        )
+        and _same_provider_team(
+            _provider_team_name(item.get("awayTeam") or item.get("awayTeamName")),
+            match_record.away_team.name,
+        )
+        and (
+            _provider_score(item, "home") is None
+            or _provider_score(item, "home") == match_record.home_score
+        )
+        and (
+            _provider_score(item, "away") is None
+            or _provider_score(item, "away") == match_record.away_score
+        )
+    ]
+    if len(matches) != 1:
+        return None
+    provider_id = matches[0].get("id", matches[0].get("matchId"))
+    if provider_id is None or isinstance(provider_id, bool) or not str(provider_id).isdigit() or int(provider_id) <= 0:
+        return None
+    return str(provider_id)
+
+
+def _highlightly_fixture_metadata_matches(
+    item: dict,
+    match_record: models.Match,
+) -> bool:
+    league = item.get("league")
+    if isinstance(league, dict):
+        if league.get("id") is not None:
+            try:
+                if int(league["id"]) != HIGHLIGHTLY_SERIE_A_LEAGUE_ID:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        if league.get("season") is not None and str(league["season"]) != str(match_record.season):
+            return False
+    country = item.get("country")
+    if isinstance(country, dict) and country.get("code") is not None:
+        if str(country["code"]).upper() != "IT":
+            return False
+    raw_date = item.get("date")
+    if raw_date:
+        try:
+            provider_date = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if provider_date.date() != match_record.match_date.date():
+            return False
+    return True
+
+
+def _numeric(value: object) -> float | int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip().replace("%", "")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _highlightly_statistics(body: object) -> dict[str, float | int | None]:
+    result = {
+        "home_possession": None, "away_possession": None,
+        "home_shots": None, "away_shots": None,
+        "home_shots_on_target": None, "away_shots_on_target": None,
+    }
+    if not isinstance(body, list):
+        body = body.get("statistics", body.get("data", [])) if isinstance(body, dict) else []
+    teams = body if isinstance(body, list) else []
+    for index, team in enumerate(teams[:2]):
+        if not isinstance(team, dict):
+            continue
+        stats = team.get("statistics", team)
+        if isinstance(stats, list):
+            entries = {
+                "".join(character for character in str(item.get("displayName", "")).casefold() if character.isalnum()): item.get("value")
+                for item in stats
+                if isinstance(item, dict) and item.get("displayName") is not None
+            }
+        elif isinstance(stats, dict):
+            entries = {
+                "".join(character for character in str(name).casefold() if character.isalnum()): value
+                for name, value in stats.items()
+            }
+        else:
+            continue
+        prefix = "home_" if index == 0 else "away_"
+        def first(*names: str) -> object:
+            return next(
+                (entries[name] for name in names if entries.get(name) is not None),
+                None,
+            )
+        possession = _numeric(
+            first("ballpossession", "possession", "possessionpercentage")
+        )
+        if isinstance(possession, (int, float)) and 0 <= possession <= 1:
+            possession *= 100
+        result[prefix + "possession"] = possession
+        result[prefix + "shots"] = _numeric(
+            first("totalshots", "shots", "shotstotal")
+        )
+        result[prefix + "shots_on_target"] = _numeric(
+            first("shotsontarget", "shotsongoal", "shotsontargettotal")
+        )
+    return result
 
 
 def _match_date_value(match_record: models.Match) -> str:
@@ -264,16 +484,15 @@ def get_matches(
         status=None if status in (None, "all") else status,
     )
     if source == "live":
-        official_ids = {
-            match_record.id
-            for match_record in matches
-            if match_record.football_data_match_id is not None
-        }
-        if official_ids:
+        official_query = session.query(models.Match.id).filter(
+            models.Match.data_source == "live", models.Match.football_data_match_id.is_not(None))
+        if season is not None:
+            official_query = official_query.filter(models.Match.season == season)
+        if official_query.first() is not None:
             matches = [
                 match_record
                 for match_record in matches
-                if match_record.id in official_ids
+                if match_record.football_data_match_id is not None
             ]
     return [match_summary(match_record) for match_record in matches]
 
@@ -288,6 +507,7 @@ def get_standings(
         query = query.filter(models.LeagueStanding.season == season)
     return [
         {
+            "season": row.season,
             "position": row.position,
             "team_name": row.team.name,
             "played": row.played,
@@ -475,13 +695,15 @@ def _match_details(match_record: models.Match) -> dict:
         {
             "id": event.id,
             "minute": event.minute,
+            "added_minute": event.added_minute,
+            "source": event.source,
             "type": event.event_type,
             "team_name": event.team_name,
             "player_name": event.player_name,
             "assist_name": event.assist_name,
             "detail": event.detail,
         }
-        for event in sorted(match_record.events, key=lambda row: (row.minute is None, row.minute or 0, row.id))
+        for event in sorted(match_record.events, key=lambda row: (row.minute is None, row.minute or 0, row.added_minute or 0, row.id))
     ]
     statistics_values = (
         (
@@ -563,7 +785,7 @@ def _match_details(match_record: models.Match) -> dict:
         "goal_assists_complete": bool(players) and all(
             player.assists is not None for _team_name, player in players
         ),
-        "contributions_source": "strikerapi_lineups" if players else None,
+        "contributions_source": next((lineup.source for lineup in match_record.lineups if lineup.source), "saved_lineups") if players else None,
         "events": events,
         "events_available": bool(events),
     }
@@ -574,31 +796,51 @@ def _save_highlightly_events(
     match_record: models.Match,
     body: object,
 ) -> int:
+    if isinstance(body, dict):
+        body = body.get("events", body.get("data"))
     if not isinstance(body, list):
         raise ValueError("Highlightly returned malformed event data.")
-    match_record.events.clear()
+    parsed = []
+    def name(value):
+        if isinstance(value, dict):
+            value = value.get("name")
+        return str(value) if value is not None else None
     for item in body:
-        if not isinstance(item, dict):
-            continue
-        team = item.get("team")
-        team_name = team.get("name") if isinstance(team, dict) else None
-        raw_minute = str(item.get("time", "")).split("+", 1)[0].strip()
-        try:
-            minute = int(raw_minute) if raw_minute else None
-        except ValueError:
-            minute = None
-        match_record.events.append(
-            models.MatchEvent(
-                provider_event_id=str(item.get("playerId")) if item.get("playerId") is not None else None,
-                minute=minute,
-                event_type=str(item.get("type") or "Unknown"),
-                team_name=team_name,
-                player_name=item.get("player"),
-                assist_name=item.get("assist"),
-                detail=item.get("substituted"),
-            )
-        )
-    return len(match_record.events)
+        if not isinstance(item, dict) or not item.get("type"):
+            raise ValueError("Highlightly returned an invalid event.")
+        team_name = name(item.get("team"))
+        if team_name:
+            matched = [team.name for team in (match_record.home_team, match_record.away_team)
+                       if _same_provider_team(team_name, team.name)]
+            if len(matched) != 1:
+                raise ValueError("An event team does not match the stored fixture.")
+            team_name = matched[0]
+        clock = item.get("time", item.get("minute"))
+        minute, added = None, None
+        if clock is not None:
+            raw = str(clock).strip().removesuffix("'")
+            parts = raw.split("+", 1)
+            if any(not part.strip().isdigit() for part in parts):
+                raise ValueError("An event minute could not be parsed safely.")
+            minute = int(parts[0])
+            added = int(parts[1]) if len(parts) == 2 else None
+        identity = item.get("id", item.get("eventId"))
+        parsed.append(models.MatchEvent(
+            provider_event_id=str(identity) if identity is not None else None,
+            minute=minute, added_minute=added, source="highlightly",
+            event_type=str(item["type"]), team_name=team_name,
+            player_name=name(item.get("player")), assist_name=name(item.get("assist")),
+            detail=name(item.get("substituted")),
+        ))
+    # Validate the entire payload before replacing this provider's event records.
+    if parsed:
+        for event in list(match_record.events):
+            if event.source == "highlightly":
+                match_record.events.remove(event)
+        match_record.events.extend(parsed)
+    session.flush()
+    return len(parsed)
+
 
 
 def _statistics_api_http_error(error: StatisticsAPIError) -> None:
@@ -949,6 +1191,8 @@ def _lineup_details(match_record: models.Match) -> dict:
                 "team_id": lineup.team_id,
                 "team_name": lineup.team.name,
                 "formation": lineup.formation,
+                "source": lineup.source,
+                "provider_match_id": lineup.provider_match_id,
                 "available": True,
                 **players_by_role,
             }
@@ -1061,27 +1305,49 @@ def import_highlightly_details(
             status_code=400,
             detail="Set confirmed=true to authorize one box-score and one events request.",
         )
+    result = sync_highlightly_details(HighlightlySyncRequest(
+        season=int(match_record.season), match_id=match_id, max_requests=2,
+        categories=["box-score", "events"], allow_fixture_lookup=False,
+        confirmed=True), session)
+    session.refresh(match_record)
+    return {"match_id": match_id, "player_records_updated": sum(
+        player.rating is not None or player.minutes_played is not None
+        for lineup in match_record.lineups for player in lineup.players),
+        "events_imported": len(match_record.events), "details": _match_details(match_record),
+        "requests_used": result["requests_used"], "stopped_reason": result["stopped_reason"]}
+
+
+
+@app.post("/api/highlightly/sync")
+def sync_highlightly_details(
+    request: HighlightlySyncRequest,
+    session: Session = Depends(get_database_session),
+) -> dict:
+    """Run only the explicitly approved categories under a bounded budget."""
+    from app.highlightly_sync import SYNC_LOCK, run_sync
+    if not request.confirmed:
+        raise HTTPException(status_code=400, detail="Set confirmed=true to authorize this bounded sync batch.")
+    if not SYNC_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A synchronization batch is already running.")
     try:
-        client = HighlightlyClient()
-        box_score = client.get_box_score(int(match_record.highlightly_match_id))
-        events = client.get_events(int(match_record.highlightly_match_id))
-        players = [
-            player
-            for lineup in match_record.lineups
-            for player in lineup.players
-        ]
-        updated = merge_highlightly_box_score(players, box_score)
-        event_count = _save_highlightly_events(session, match_record, events)
-        session.commit()
-        return {
-            "match_id": match_id,
-            "player_records_updated": updated,
-            "events_imported": event_count,
-            "details": _match_details(match_record),
-        }
-    except (HighlightlyError, ValueError) as error:
-        session.rollback()
-        raise HTTPException(status_code=502, detail=str(error)) from error
+        result = run_sync(session, request, HighlightlyClient(), _find_highlightly_fixture,
+                          _highlightly_statistics, _save_highlightly_events)
+        result["coverage"] = data_coverage(session)
+        return result
+    finally:
+        SYNC_LOCK.release()
+
+
+@app.post("/api/highlightly/plan")
+def plan_highlightly_details(request: HighlightlySyncRequest,
+                            session: Session = Depends(get_database_session)) -> dict:
+    """Inspect cached records and quota metadata; no authenticated requests."""
+    from app.highlightly_sync import sync_plan
+    return sync_plan(session, request.season, request.categories,
+                     request.match_ids if request.match_ids is not None else (
+                         [request.match_id] if request.match_id else None),
+                     request.max_matches, request.allow_fixture_lookup)
+
 
 
 @app.post("/api/matches/{match_id}/lineups/import")
@@ -1113,76 +1379,16 @@ def import_match_lineups(
             ),
         )
 
+    if match_record.football_data_match_id is not None or match_record.highlightly_match_id is not None:
+        result = sync_highlightly_details(HighlightlySyncRequest(
+            season=int(match_record.season), match_id=match_id,
+            categories=["lineups"], max_requests=2, confirmed=True), session)
+        session.refresh(match_record)
+        response = _lineup_details(match_record)
+        response.update(source="highlightly", requests_used=result["requests_used"],
+                        stopped_reason=result["stopped_reason"])
+        return response
     try:
-        highlightly_lookup = (
-            match_record.highlightly_match_id is None
-            and match_record.api_match_id is None
-        )
-        if match_record.highlightly_match_id is not None or highlightly_lookup:
-            client = HighlightlyClient()
-            if highlightly_lookup:
-                match_body = client.get_matches(
-                    match_record.match_date.date().isoformat(),
-                    match_record.home_team.name,
-                    match_record.away_team.name,
-                )
-                candidates = (
-                    match_body.get("data", [])
-                    if isinstance(match_body, dict)
-                    else match_body
-                )
-                if not isinstance(candidates, list):
-                    raise ValueError("Highlightly did not return a match list.")
-                exact = [
-                    item for item in candidates
-                    if isinstance(item, dict)
-                    and str(item.get("homeTeam", {}).get("name", item.get("homeTeamName", ""))).casefold()
-                    == match_record.home_team.name.casefold()
-                    and str(item.get("awayTeam", {}).get("name", item.get("awayTeamName", ""))).casefold()
-                    == match_record.away_team.name.casefold()
-                ]
-                if len(exact) != 1 or exact[0].get("id", exact[0].get("matchId")) is None:
-                    raise ValueError(
-                        "Highlightly did not return exactly one matching fixture."
-                    )
-                match_record.highlightly_match_id = str(
-                    exact[0].get("id", exact[0].get("matchId"))
-                )
-                session.flush()
-            lineup_body = client.get_lineups(int(match_record.highlightly_match_id))
-            box_score = client.get_box_score(int(match_record.highlightly_match_id))
-            events_body = client.get_events(int(match_record.highlightly_match_id))
-            normalized = convert_highlightly_lineups(
-                lineup_body,
-                box_score,
-                match_record.home_team.name,
-                match_record.away_team.name,
-            )
-            save_highlightly_lineups(session, match_record.id, normalized)
-            _save_highlightly_events(session, match_record, events_body)
-            session.commit()
-            saved_match = find_match_by_id(session, match_id, data_source="live")
-            response = _lineup_details(saved_match)
-            response["source"] = "highlightly"
-            response["estimated_requests"] = 3 if highlightly_lookup else 2
-            return response
-        if match_record.highlightly_match_id is not None:
-            client = HighlightlyClient()
-            lineup_body = client.get_lineups(int(match_record.highlightly_match_id))
-            box_score = client.get_box_score(int(match_record.highlightly_match_id))
-            normalized = convert_highlightly_lineups(
-                lineup_body,
-                box_score,
-                match_record.home_team.name,
-                match_record.away_team.name,
-            )
-            save_highlightly_lineups(session, match_record.id, normalized)
-            session.commit()
-            saved_match = find_match_by_id(session, match_id, data_source="live")
-            response = _lineup_details(saved_match)
-            response["source"] = "highlightly"
-            response["estimated_requests"] = 3 if highlightly_lookup else 2
-            return response
         striker_api = FootballAPI()
         used_match_lookup = match_record.api_match_id is None
         if match_record.api_match_id is None:
@@ -1359,4 +1565,4 @@ app.mount(
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("SERIE_A_PORT", "8000")))
